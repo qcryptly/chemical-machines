@@ -44,3 +44,6 @@ logs/
 *.so
 *.dylib
 build/
+
+# Notes
+notes/

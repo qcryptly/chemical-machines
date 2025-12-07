@@ -1,0 +1,35 @@
+{
+  "name": "cm-view",
+  "version": "1.0.0",
+  "description": "Chemical Machines web interface - Jupyter-like notebook with WebGL visualization",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "concurrently \"npm run server:dev\" \"npm run client:dev\"",
+    "server:dev": "nodemon server/index.js",
+    "client:dev": "cd client && npm run dev",
+    "client:build": "cd client && npm run build",
+    "build": "npm run client:build"
+  },
+  "keywords": [
+    "biophysics",
+    "visualization",
+    "notebook",
+    "webgl"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "body-parser": "^1.20.2",
+    "cors": "^2.8.5",
+    "ws": "^8.14.2",
+    "pg": "^8.11.3",
+    "elasticsearch": "^16.7.3",
+    "axios": "^1.6.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2",
+    "concurrently": "^8.2.2"
+  }
+}

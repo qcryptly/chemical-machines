@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  chemical-machines:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chemical-machines
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      - NODE_ENV=production
+    ports:
+      - "3000:3000"      # cm-view web interface
+      - "5432:5432"      # PostgreSQL
+      - "9200:9200"      # Elasticsearch
+    volumes:
+      - cm_data:/var/lib/chemical-machines
+      - workspace:/workspace
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  cm_data:
+  workspace:

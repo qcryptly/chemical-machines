@@ -1,0 +1,116 @@
+FROM nvidia/cuda:12.6.0-cudnn-devel-ubuntu24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV NODE_VERSION=22.x
+ENV CONDA_DIR=/opt/conda
+ENV PATH=$CONDA_DIR/bin:$PATH
+
+# Install base dependencies and full C++ build toolchain
+RUN apt-get update && apt-get install -y \
+    supervisor \
+    curl \
+    wget \
+    gnupg \
+    git \
+    ca-certificates \
+    build-essential \
+    gcc \
+    g++ \
+    gdb \
+    cmake \
+    make \
+    autoconf \
+    automake \
+    libtool \
+    pkg-config \
+    libboost-all-dev \
+    libeigen3-dev \
+    libopenblas-dev \
+    liblapack-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Miniconda (includes Python 3.12)
+RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh \
+    && bash /tmp/miniconda.sh -b -p $CONDA_DIR \
+    && rm /tmp/miniconda.sh \
+    && conda init bash \
+    && conda update -n base -c defaults conda -y
+
+# Install Node.js
+RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION} | bash - \
+    && apt-get install -y nodejs
+
+# Install PostgreSQL 17
+RUN sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list' \
+    && wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/postgresql-keyring.gpg \
+    && sh -c 'echo "deb [signed-by=/usr/share/keyrings/postgresql-keyring.gpg] http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list' \
+    && apt-get update \
+    && apt-get install -y postgresql-17 postgresql-contrib-17 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Elasticsearch 8.15
+RUN wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | gpg --dearmor -o /usr/share/keyrings/elasticsearch-keyring.gpg \
+    && sh -c 'echo "deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] https://artifacts.elastic.co/packages/8.x/apt stable main" > /etc/apt/sources.list.d/elastic-8.x.list' \
+    && apt-get update \
+    && apt-get install -y elasticsearch \
+    && rm -rf /var/lib/apt/lists/*
+
+# Configure Elasticsearch
+RUN mkdir -p /usr/share/elasticsearch/data \
+    && chown -R elasticsearch:elasticsearch /usr/share/elasticsearch \
+    && echo "xpack.security.enabled: false" >> /etc/elasticsearch/elasticsearch.yml \
+    && echo "discovery.type: single-node" >> /etc/elasticsearch/elasticsearch.yml
+
+# Configure PostgreSQL
+RUN mkdir -p /var/lib/postgresql/data \
+    && chown -R postgres:postgres /var/lib/postgresql \
+    && su - postgres -c "/usr/lib/postgresql/17/bin/initdb -D /var/lib/postgresql/data" \
+    && echo "host all all 0.0.0.0/0 md5" >> /var/lib/postgresql/data/pg_hba.conf \
+    && echo "listen_addresses='*'" >> /var/lib/postgresql/data/postgresql.conf
+
+# Create conda environment for compute with PyTorch + CUDA
+RUN conda create -n chemcomp python=3.12 -y \
+    && conda install -n chemcomp -c pytorch -c nvidia pytorch torchvision torchaudio pytorch-cuda=12.6 -y \
+    && conda run -n chemcomp pip install --no-cache-dir \
+        numpy scipy scikit-learn pandas \
+        biopython rdkit openmm mdanalysis \
+        psycopg2-binary elasticsearch \
+        pybind11
+
+# Create application user
+RUN useradd -m -s /bin/bash cmuser
+
+# Create application directories
+RUN mkdir -p /app/cm-compute /app/cm-view /var/run /var/log/supervisor \
+    && chown -R cmuser:cmuser /app
+
+# Set working directory
+WORKDIR /app
+
+# Copy application code
+COPY cm-compute /app/cm-compute
+COPY cm-view /app/cm-view
+
+# Install Node.js dependencies
+RUN cd /app/cm-compute && npm install --production \
+    && cd /app/cm-view && npm install --production \
+    && cd /app/cm-view/client && npm install && npm run build
+
+# Copy supervisor configuration
+COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+# Create PostgreSQL database and user
+RUN service postgresql start \
+    && su - postgres -c "psql -c \"CREATE USER cmuser WITH PASSWORD 'changeme';\"" \
+    && su - postgres -c "psql -c \"CREATE DATABASE chemicalmachines OWNER cmuser;\"" \
+    && su - postgres -c "psql -c \"GRANT ALL PRIVILEGES ON DATABASE chemicalmachines TO cmuser;\"" \
+    && service postgresql stop
+
+# Update supervisord to use conda environment for cm-compute
+RUN sed -i 's|/usr/bin/node /app/cm-compute|/opt/conda/envs/chemcomp/bin/python /app/cm-compute|g' /etc/supervisor/conf.d/supervisord.conf
+
+# Expose ports
+EXPOSE 3000 5432 9200
+
+# Start supervisor
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

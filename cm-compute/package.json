@@ -1,0 +1,32 @@
+{
+  "name": "cm-compute",
+  "version": "1.0.0",
+  "description": "Chemical Machines compute daemon - PyTorch + CUDA molecular dynamics engine",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "build:cpp": "node-gyp rebuild"
+  },
+  "keywords": [
+    "biophysics",
+    "molecular-dynamics",
+    "drug-design",
+    "pytorch",
+    "cuda"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "body-parser": "^1.20.2",
+    "pg": "^8.11.3",
+    "elasticsearch": "^16.7.3",
+    "uuid": "^9.0.1",
+    "python-shell": "^5.0.0",
+    "node-gyp": "^10.0.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}

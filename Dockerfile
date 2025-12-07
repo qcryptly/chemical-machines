@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.6.0-cudnn-devel-ubuntu24.04
+FROM nvidia/cuda:13.0.2-cudnn-devel-ubuntu24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV NODE_VERSION=22.x
@@ -33,6 +33,8 @@ RUN apt-get update && apt-get install -y \
 RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh \
     && bash /tmp/miniconda.sh -b -p $CONDA_DIR \
     && rm /tmp/miniconda.sh \
+    && conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main \
+    && conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r \
     && conda init bash \
     && conda update -n base -c defaults conda -y
 
@@ -40,11 +42,13 @@ RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -
 RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION} | bash - \
     && apt-get install -y nodejs
 
+RUN apt install -y tzdata
+
 # Install PostgreSQL 17
-RUN sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list' \
+RUN sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt noble-pgdg main" > /etc/apt/sources.list.d/pgdg.list' \
     && wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/postgresql-keyring.gpg \
-    && sh -c 'echo "deb [signed-by=/usr/share/keyrings/postgresql-keyring.gpg] http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list' \
-    && apt-get update \
+    && sh -c 'echo "deb [signed-by=/usr/share/keyrings/postgresql-keyring.gpg] http://apt.postgresql.org/pub/repos/apt noble-pgdg main" > /etc/apt/sources.list.d/pgdg.list' \
+    && apt-get update -y \
     && apt-get install -y postgresql-17 postgresql-contrib-17 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -68,10 +72,15 @@ RUN mkdir -p /var/lib/postgresql/data \
     && echo "host all all 0.0.0.0/0 md5" >> /var/lib/postgresql/data/pg_hba.conf \
     && echo "listen_addresses='*'" >> /var/lib/postgresql/data/postgresql.conf
 
+RUN conda tos accept --override-channels --channel https://conda.anaconda.org/pytorch \
+    && conda tos accept --override-channels --channel https://conda.anaconda.org/nvidia \
+    && conda tos accept --override-channels --channel default
+
 # Create conda environment for compute with PyTorch + CUDA
 RUN conda create -n chemcomp python=3.12 -y \
-    && conda install -n chemcomp -c pytorch -c nvidia pytorch torchvision torchaudio pytorch-cuda=12.6 -y \
-    && conda run -n chemcomp pip install --no-cache-dir \
+    && conda install -n chemcomp -c pytorch -c nvidia pytorch torchvision torchaudio pytorch-cuda -y
+
+RUN conda run -n chemcomp pip install --no-cache-dir \
         numpy scipy scikit-learn pandas \
         biopython rdkit openmm mdanalysis \
         psycopg2-binary elasticsearch \
@@ -98,6 +107,7 @@ RUN cd /app/cm-compute && npm install --production \
 
 # Copy supervisor configuration
 COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+COPY docker/elasticsearch.yml /etc/elasticsearch/elasticsearch.yml
 
 # Create PostgreSQL database and user
 RUN service postgresql start \

@@ -1,35 +1,115 @@
 const express = require('express');
+const http = require('http');
+const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
-const { Pool } = require('pg');
 const { Client } = require('elasticsearch');
-const { v4: uuidv4 } = require('uuid');
-const { fork } = require('child_process');
-const ComputeQueue = require('./queue');
-const ComputeWorker = require('./worker');
+const { spawn, execSync } = require('child_process');
+const { ComputeQueue, JobListener } = require('./compute');
+const { createMainLogger } = require('./logger');
+const database = require('./database');
+
+// Initialize main logger
+const logger = createMainLogger();
+
+// Initialize job listener for demuxing stdout/stderr by job ID
+const jobListener = new JobListener();
+
+// Conda environment management
+const CONDA_PATH = process.env.CONDA_PATH || '/opt/conda';
+
+function getCondaEnvs() {
+  try {
+    const result = execSync(`${CONDA_PATH}/bin/conda env list --json`, { encoding: 'utf-8' });
+    const data = JSON.parse(result);
+    return data.envs.map(envPath => {
+      const name = path.basename(envPath);
+      const isBase = envPath === CONDA_PATH;
+
+      // Get Python version for this environment
+      let pythonVersion = null;
+      try {
+        const pythonPath = isBase
+          ? `${CONDA_PATH}/bin/python`
+          : `${envPath}/bin/python`;
+        if (fs.existsSync(pythonPath)) {
+          pythonVersion = execSync(`${pythonPath} --version 2>&1`, { encoding: 'utf-8' }).trim().replace('Python ', '');
+        }
+      } catch (e) {
+        pythonVersion = 'unknown';
+      }
+
+      // Get installed packages count
+      let packageCount = 0;
+      try {
+        const pkgResult = execSync(`${CONDA_PATH}/bin/conda list -n ${isBase ? 'base' : name} --json`, { encoding: 'utf-8' });
+        packageCount = JSON.parse(pkgResult).length;
+      } catch (e) {}
+
+      return {
+        name: isBase ? 'base' : name,
+        path: envPath,
+        pythonVersion,
+        packageCount,
+        isBase
+      };
+    });
+  } catch (error) {
+    console.error('Error listing conda environments:', error);
+    return [];
+  }
+}
+
+function getAvailablePythonVersions() {
+  try {
+    const result = execSync(`${CONDA_PATH}/bin/conda search python --json`, { encoding: 'utf-8' });
+    const data = JSON.parse(result);
+    const versions = [...new Set(data.python.map(p => p.version))];
+    // Filter to major.minor versions and sort descending
+    const majorMinor = [...new Set(versions.map(v => v.split('.').slice(0, 2).join('.')))];
+    return majorMinor.sort((a, b) => {
+      const [aMaj, aMin] = a.split('.').map(Number);
+      const [bMaj, bMin] = b.split('.').map(Number);
+      return bMaj - aMaj || bMin - aMin;
+    }).slice(0, 10); // Return top 10 versions
+  } catch (error) {
+    console.error('Error getting Python versions:', error);
+    return ['3.12', '3.11', '3.10', '3.9', '3.8'];
+  }
+}
 
 const SOCKET_PATH = process.env.COMPUTE_SOCKET_PATH || '/var/run/cm-compute.sock';
 const HTTP_PORT = process.env.COMPUTE_HTTP_PORT || 3001;
 
-// Database connections
-const pgPool = new Pool({
-  host: process.env.POSTGRES_HOST || 'localhost',
-  database: process.env.POSTGRES_DB || 'chemicalmachines',
-  user: process.env.POSTGRES_USER || 'cmuser',
-  password: process.env.POSTGRES_PASSWORD || 'changeme',
-  port: 5432,
-});
+// Database models (initialized in start())
+let Job = null;
 
 const esClient = new Client({
   node: `http://${process.env.ELASTICSEARCH_HOST || 'localhost'}:${process.env.ELASTICSEARCH_PORT || 9200}`,
 });
 
-// Initialize compute queue
-const computeQueue = new ComputeQueue();
+// Initialize compute queue with job listener for output demuxing
+const computeQueue = new ComputeQueue({ jobListener });
 
 // Express app
 const app = express();
 app.use(express.json({ limit: '50mb' }));
+
+// Request logging middleware
+app.use((req, res, next) => {
+  const startTime = Date.now();
+  logger.request(req.method, req.path, req.body && Object.keys(req.body).length > 0 ? req.body : null);
+
+  // Capture response
+  const originalSend = res.send;
+  res.send = function(body) {
+    const duration = Date.now() - startTime;
+    logger.response(req.method, req.path, res.statusCode, { duration: `${duration}ms` });
+    return originalSend.call(this, body);
+  };
+
+  next();
+});
 
 // Health check
 app.get('/health', (req, res) => {
@@ -48,30 +128,19 @@ app.post('/compute', async (req, res) => {
     return res.status(400).json({ error: 'Compute type required' });
   }
 
-  const jobId = uuidv4();
-  const job = {
-    id: jobId,
-    type,
-    params,
-    priority,
-    status: 'queued',
-    createdAt: new Date().toISOString(),
-  };
-
   try {
-    // Store job in database
-    await pgPool.query(
-      'INSERT INTO compute_jobs (id, type, params, priority, status, created_at) VALUES ($1, $2, $3, $4, $5, $6)',
-      [job.id, job.type, JSON.stringify(job.params), job.priority, job.status, job.createdAt]
-    );
+    // Create job in database
+    const job = await Job.create({ type, params, priority });
+    const jobId = job.id.toString();
+
+    logger.job('QUEUED', jobId, { type, params, priority });
 
     // Add to queue
-    computeQueue.enqueue(job, async (result) => {
-      // Update job status in database
-      await pgPool.query(
-        'UPDATE compute_jobs SET status = $1, result = $2, completed_at = $3 WHERE id = $4',
-        [result.error ? 'failed' : 'completed', JSON.stringify(result), new Date().toISOString(), jobId]
-      );
+    computeQueue.enqueue({ ...job, id: jobId }, async (result) => {
+      const status = result.error ? 'failed' : 'completed';
+      logger.job(status.toUpperCase(), jobId, result.error ? { error: result.error } : { success: true });
+
+      await Job.updateStatus(job.id, status, result);
     });
 
     res.json({
@@ -80,6 +149,7 @@ app.post('/compute', async (req, res) => {
       position: computeQueue.getPosition(jobId)
     });
   } catch (error) {
+    logger.error('Error submitting job', { error: error.message, stack: error.stack });
     console.error('Error submitting job:', error);
     res.status(500).json({ error: error.message });
   }
@@ -90,20 +160,17 @@ app.get('/compute/:jobId', async (req, res) => {
   const { jobId } = req.params;
 
   try {
-    const result = await pgPool.query(
-      'SELECT * FROM compute_jobs WHERE id = $1',
-      [jobId]
-    );
+    const job = await Job.findById(jobId);
 
-    if (result.rows.length === 0) {
+    if (!job) {
       return res.status(404).json({ error: 'Job not found' });
     }
 
-    const job = result.rows[0];
     const queuePosition = computeQueue.getPosition(jobId);
 
     res.json({
       ...job,
+      id: job.id.toString(),
       queuePosition,
     });
   } catch (error) {
@@ -111,6 +178,405 @@ app.get('/compute/:jobId', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+// ================== Conda Environment Management ==================
+
+// List all conda environments
+app.get('/environments', (req, res) => {
+  try {
+    const envs = getCondaEnvs();
+    res.json({ environments: envs });
+  } catch (error) {
+    console.error('Error listing environments:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get available Python versions
+app.get('/environments/python-versions', (req, res) => {
+  try {
+    const versions = getAvailablePythonVersions();
+    res.json({ versions });
+  } catch (error) {
+    console.error('Error getting Python versions:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create new conda environment
+app.post('/environments', async (req, res) => {
+  const { name, pythonVersion = '3.12', packages = [] } = req.body;
+
+  if (!name) {
+    return res.status(400).json({ error: 'Environment name required' });
+  }
+
+  if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(name)) {
+    return res.status(400).json({ error: 'Invalid environment name. Use alphanumeric characters, hyphens, and underscores.' });
+  }
+
+  // Check if environment already exists
+  const existingEnvs = getCondaEnvs();
+  if (existingEnvs.some(e => e.name === name)) {
+    return res.status(409).json({ error: `Environment '${name}' already exists` });
+  }
+
+  try {
+    logger.info('Creating conda environment', { name, pythonVersion, packages });
+    const job = await Job.create({
+      type: 'create_environment',
+      params: { name, pythonVersion, packages },
+      priority: 5
+    });
+
+    const jobId = job.id.toString();
+    computeQueue.enqueue({ ...job, id: jobId });
+
+    // Return job info - client can subscribe to WebSocket for progress
+    res.json({
+      jobId,
+      status: 'queued',
+      message: `Creating environment '${name}' with Python ${pythonVersion}...`,
+      params: { name, pythonVersion, packages }
+    });
+  } catch (error) {
+    logger.error('Error creating environment job', { name, error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete conda environment
+app.delete('/environments/:name', (req, res) => {
+  const { name } = req.params;
+
+  if (name === 'base') {
+    return res.status(400).json({ error: 'Cannot delete base environment' });
+  }
+
+  // Check if environment exists
+  const existingEnvs = getCondaEnvs();
+  if (!existingEnvs.some(e => e.name === name)) {
+    return res.status(404).json({ error: `Environment '${name}' not found` });
+  }
+
+  try {
+    logger.info('Deleting conda environment', { name });
+    execSync(`${CONDA_PATH}/bin/conda env remove -n ${name} -y`, { encoding: 'utf-8' });
+    logger.info('Deleted conda environment', { name });
+    res.json({ status: 'deleted', name });
+  } catch (error) {
+    logger.error('Error deleting environment', { name, error: error.message });
+    console.error(`Error deleting environment ${name}:`, error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Install packages in environment
+app.post('/environments/:name/packages', (req, res) => {
+  const { name } = req.params;
+  const { packages, channel = null } = req.body;
+
+  if (!packages || !Array.isArray(packages) || packages.length === 0) {
+    return res.status(400).json({ error: 'Packages array required' });
+  }
+
+  logger.info('Installing packages', { environment: name, packages, channel });
+
+  const args = ['install', '-n', name, '-y', ...packages];
+  if (channel) {
+    args.splice(1, 0, '-c', channel);
+  }
+
+  const installProcess = spawn(`${CONDA_PATH}/bin/conda`, args, {
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+
+  let stderr = '';
+  installProcess.stderr.on('data', (data) => { stderr += data.toString(); });
+
+  installProcess.on('close', (code) => {
+    if (code === 0) {
+      logger.info('Installed packages', { environment: name, packages });
+    } else {
+      logger.error('Failed to install packages', { environment: name, packages, stderr, exitCode: code });
+      console.error(`Failed to install packages in ${name}:`, stderr);
+    }
+  });
+
+  res.json({
+    status: 'installing',
+    environment: name,
+    packages,
+    message: `Installing ${packages.join(', ')} in '${name}'...`
+  });
+});
+
+// Get packages in environment
+app.get('/environments/:name/packages', (req, res) => {
+  const { name } = req.params;
+
+  try {
+    const result = execSync(`${CONDA_PATH}/bin/conda list -n ${name} --json`, { encoding: 'utf-8' });
+    const packages = JSON.parse(result);
+    res.json({ packages });
+  } catch (error) {
+    console.error(`Error listing packages for ${name}:`, error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ================== C++ Environment Management ==================
+
+// Database models for C++ environments (initialized in start())
+let CppEnvironment = null;
+let VendorEnvironment = null;
+
+// Search for available debian dev packages
+app.get('/debian-packages/search', async (req, res) => {
+  const { q, limit = 50 } = req.query;
+
+  if (!q || q.length < 2) {
+    return res.json({ packages: [] });
+  }
+
+  try {
+    // Search for dev packages using apt-cache
+    const result = execSync(
+      `apt-cache search "${q}" | grep -E "^lib.*-dev |^.*-dev " | head -n ${limit}`,
+      { encoding: 'utf-8', timeout: 10000 }
+    );
+
+    const packages = result.trim().split('\n')
+      .filter(line => line.length > 0)
+      .map(line => {
+        const [name, ...descParts] = line.split(' - ');
+        return {
+          name: name.trim(),
+          description: descParts.join(' - ').trim()
+        };
+      });
+
+    res.json({ packages });
+  } catch (error) {
+    // If no results or error, return empty
+    if (error.status === 1) {
+      return res.json({ packages: [] });
+    }
+    console.error('Error searching debian packages:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// List all C++ environments
+app.get('/cpp-environments', async (req, res) => {
+  try {
+    if (!CppEnvironment) {
+      return res.json({ environments: [] });
+    }
+    const envs = await CppEnvironment.findAll();
+    res.json({ environments: envs });
+  } catch (error) {
+    console.error('Error listing C++ environments:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get C++ environment details
+app.get('/cpp-environments/:name', async (req, res) => {
+  try {
+    if (!CppEnvironment) {
+      return res.status(404).json({ error: 'Environment not found' });
+    }
+    const env = await CppEnvironment.findByName(req.params.name);
+    if (!env) {
+      return res.status(404).json({ error: 'Environment not found' });
+    }
+
+    // Get linked vendor environments
+    const vendorEnvs = await CppEnvironment.getLinkedVendorEnvironments(env.id);
+
+    res.json({ ...env, vendorEnvironments: vendorEnvs });
+  } catch (error) {
+    console.error('Error fetching C++ environment:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create C++ environment
+app.post('/cpp-environments', async (req, res) => {
+  const { name, description = '', packages = [] } = req.body;
+
+  if (!name) {
+    return res.status(400).json({ error: 'Environment name required' });
+  }
+
+  if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(name)) {
+    return res.status(400).json({ error: 'Invalid environment name. Use alphanumeric characters, hyphens, and underscores.' });
+  }
+
+  try {
+    // Check if environment already exists
+    const existing = await CppEnvironment.findByName(name);
+    if (existing) {
+      return res.status(409).json({ error: `Environment '${name}' already exists` });
+    }
+
+    logger.info('Creating C++ environment', { name, packages });
+
+    // Create job to install packages
+    const job = await Job.create({
+      type: 'create_cpp_environment',
+      params: { name, description, packages },
+      priority: 5
+    });
+
+    const jobId = job.id.toString();
+    computeQueue.enqueue({ ...job, id: jobId });
+
+    res.json({
+      jobId,
+      status: 'queued',
+      message: `Creating C++ environment '${name}'...`,
+      params: { name, description, packages }
+    });
+  } catch (error) {
+    logger.error('Error creating C++ environment', { name, error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete C++ environment
+app.delete('/cpp-environments/:name', async (req, res) => {
+  const { name } = req.params;
+
+  try {
+    const env = await CppEnvironment.findByName(name);
+    if (!env) {
+      return res.status(404).json({ error: `Environment '${name}' not found` });
+    }
+
+    logger.info('Deleting C++ environment', { name });
+    await CppEnvironment.deleteByName(name);
+    logger.info('Deleted C++ environment', { name });
+
+    res.json({ status: 'deleted', name });
+  } catch (error) {
+    logger.error('Error deleting C++ environment', { name, error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ================== Vendor Environment Management ==================
+
+// List all vendor environments
+app.get('/vendor-environments', async (req, res) => {
+  try {
+    if (!VendorEnvironment) {
+      return res.json({ environments: [] });
+    }
+    const envs = await VendorEnvironment.findAll();
+    res.json({ environments: envs });
+  } catch (error) {
+    console.error('Error listing vendor environments:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get vendor environment details
+app.get('/vendor-environments/:name', async (req, res) => {
+  try {
+    if (!VendorEnvironment) {
+      return res.status(404).json({ error: 'Vendor environment not found' });
+    }
+    const env = await VendorEnvironment.findByName(req.params.name);
+    if (!env) {
+      return res.status(404).json({ error: 'Vendor environment not found' });
+    }
+    res.json(env);
+  } catch (error) {
+    console.error('Error fetching vendor environment:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create vendor environment
+app.post('/vendor-environments', async (req, res) => {
+  const { name, description = '', repo, branch = 'main', buildType = 'cmake', cmakeOptions = '' } = req.body;
+
+  if (!name) {
+    return res.status(400).json({ error: 'Environment name required' });
+  }
+
+  if (!repo) {
+    return res.status(400).json({ error: 'Repository URL required' });
+  }
+
+  if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(name)) {
+    return res.status(400).json({ error: 'Invalid environment name. Use alphanumeric characters, hyphens, and underscores.' });
+  }
+
+  try {
+    // Check if environment already exists
+    const existing = await VendorEnvironment.findByName(name);
+    if (existing) {
+      return res.status(409).json({ error: `Vendor environment '${name}' already exists` });
+    }
+
+    logger.info('Creating vendor environment', { name, repo, branch, buildType });
+
+    // Create job to clone and build
+    const job = await Job.create({
+      type: 'create_vendor_environment',
+      params: { name, description, repo, branch, buildType, cmakeOptions },
+      priority: 5
+    });
+
+    const jobId = job.id.toString();
+    computeQueue.enqueue({ ...job, id: jobId });
+
+    res.json({
+      jobId,
+      status: 'queued',
+      message: `Creating vendor environment '${name}' from ${repo}...`,
+      params: { name, description, repo, branch, buildType }
+    });
+  } catch (error) {
+    logger.error('Error creating vendor environment', { name, error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete vendor environment
+app.delete('/vendor-environments/:name', async (req, res) => {
+  const { name } = req.params;
+
+  try {
+    const env = await VendorEnvironment.findByName(name);
+    if (!env) {
+      return res.status(404).json({ error: `Vendor environment '${name}' not found` });
+    }
+
+    logger.info('Deleting vendor environment', { name });
+
+    // Remove installation directory
+    const installPrefix = `/opt/vendor/${name}`;
+    try {
+      execSync(`rm -rf ${installPrefix}`, { encoding: 'utf-8' });
+    } catch (e) {
+      // Directory may not exist
+    }
+
+    await VendorEnvironment.deleteByName(name);
+    logger.info('Deleted vendor environment', { name });
+
+    res.json({ status: 'deleted', name });
+  } catch (error) {
+    logger.error('Error deleting vendor environment', { name, error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ================== Job Management ==================
 
 // Cancel job
 app.delete('/compute/:jobId', async (req, res) => {
@@ -120,10 +586,7 @@ app.delete('/compute/:jobId', async (req, res) => {
     const cancelled = computeQueue.cancel(jobId);
 
     if (cancelled) {
-      await pgPool.query(
-        'UPDATE compute_jobs SET status = $1 WHERE id = $2',
-        ['cancelled', jobId]
-      );
+      await Job.updateStatus(jobId, 'cancelled');
       res.json({ status: 'cancelled' });
     } else {
       res.status(404).json({ error: 'Job not found or already completed' });
@@ -134,38 +597,27 @@ app.delete('/compute/:jobId', async (req, res) => {
   }
 });
 
-// Initialize database schema
-async function initDatabase() {
-  await pgPool.query(`
-    CREATE TABLE IF NOT EXISTS compute_jobs (
-      id VARCHAR(36) PRIMARY KEY,
-      type VARCHAR(255) NOT NULL,
-      params JSONB,
-      priority INTEGER DEFAULT 5,
-      status VARCHAR(50) DEFAULT 'queued',
-      result JSONB,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      started_at TIMESTAMP,
-      completed_at TIMESTAMP
-    );
-    CREATE INDEX IF NOT EXISTS idx_compute_jobs_status ON compute_jobs(status);
-    CREATE INDEX IF NOT EXISTS idx_compute_jobs_created_at ON compute_jobs(created_at);
-  `);
-}
-
 // Start the server
 async function start() {
   try {
+    logger.info('Starting cm-compute daemon');
+
     // Initialize database
-    await initDatabase();
+    const db = await database.initialize();
+    Job = db.models.Job;
+    CppEnvironment = db.models.CppEnvironment;
+    VendorEnvironment = db.models.VendorEnvironment;
+    logger.info('Database initialized');
     console.log('Database initialized');
 
     // Test Elasticsearch connection
     await esClient.ping();
+    logger.info('Connected to Elasticsearch');
     console.log('Connected to Elasticsearch');
 
     // Start compute workers
     computeQueue.startWorkers(4); // 4 parallel workers
+    logger.info('Compute workers started', { count: 4 });
     console.log('Compute workers started');
 
     // Remove existing socket if it exists
@@ -173,27 +625,177 @@ async function start() {
       fs.unlinkSync(SOCKET_PATH);
     }
 
-    // Start HTTP server (for compatibility)
-    app.listen(HTTP_PORT, () => {
-      console.log(`cm-compute HTTP server listening on port ${HTTP_PORT}`);
+    // Start HTTP server with WebSocket support
+    const httpServer = http.createServer(app);
+    const wss = new WebSocket.Server({ server: httpServer, path: '/ws' });
+
+    // Track connected clients
+    const clients = new Set();
+
+    wss.on('connection', (ws) => {
+      clients.add(ws);
+      logger.info('WebSocket client connected', { totalClients: clients.size });
+
+      ws.on('message', async (message) => {
+        try {
+          const data = JSON.parse(message);
+
+          if (data.type === 'execute') {
+            const { code, cellId, environment } = data;
+
+            // Create job in database
+            const job = await Job.create({
+              type: 'execute',
+              params: { code, environment },
+              priority: 5
+            });
+
+            const jobId = job.id.toString();
+
+            // Send job accepted
+            ws.send(JSON.stringify({
+              type: 'job_accepted',
+              jobId,
+              cellId
+            }));
+
+            // Enqueue with callback for real-time updates
+            computeQueue.enqueue({ ...job, id: jobId }, async (result) => {
+              const status = result.error ? 'failed' : 'completed';
+
+              await Job.updateStatus(job.id, status, result);
+
+              // Send result via WebSocket
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                  type: 'job_result',
+                  jobId,
+                  cellId,
+                  status,
+                  result
+                }));
+              }
+            });
+
+            logger.job('QUEUED', jobId, { type: 'execute', cellId });
+
+          } else if (data.type === 'subscribe') {
+            // Subscribe to job output streams via job listener
+            ws.subscribedJobs = ws.subscribedJobs || new Set();
+            ws.subscribedJobs.add(data.jobId);
+
+            // Send any buffered output first
+            const buffered = jobListener.getBuffer(data.jobId);
+            if (buffered.stdout) {
+              ws.send(JSON.stringify({
+                type: 'job_output',
+                jobId: data.jobId,
+                stream: 'stdout',
+                data: buffered.stdout,
+                timestamp: Date.now()
+              }));
+            }
+            if (buffered.stderr) {
+              ws.send(JSON.stringify({
+                type: 'job_output',
+                jobId: data.jobId,
+                stream: 'stderr',
+                data: buffered.stderr,
+                timestamp: Date.now()
+              }));
+            }
+
+            // Subscribe to job output demuxed by job ID
+            const unsubscribe = jobListener.subscribe(data.jobId, (message) => {
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                  type: 'job_output',
+                  jobId: data.jobId,
+                  stream: message.type,
+                  data: message.data || message.progress || message.result || message.error,
+                  timestamp: message.timestamp
+                }));
+              }
+            });
+
+            // Store unsubscribe function for cleanup
+            ws.unsubscribers = ws.unsubscribers || new Map();
+            ws.unsubscribers.set(data.jobId, unsubscribe);
+
+            // Send subscription acknowledgement
+            ws.send(JSON.stringify({
+              type: 'subscribed',
+              jobId: data.jobId
+            }));
+
+          } else if (data.type === 'cancel') {
+            const cancelled = computeQueue.cancel(data.jobId);
+            ws.send(JSON.stringify({
+              type: 'job_cancelled',
+              jobId: data.jobId,
+              success: cancelled
+            }));
+          }
+        } catch (error) {
+          logger.error('WebSocket message error', { error: error.message });
+          ws.send(JSON.stringify({
+            type: 'error',
+            error: error.message
+          }));
+        }
+      });
+
+      ws.on('close', () => {
+        // Clean up job subscriptions
+        if (ws.unsubscribers) {
+          ws.unsubscribers.forEach(unsubscribe => unsubscribe());
+          ws.unsubscribers.clear();
+        }
+        clients.delete(ws);
+        logger.info('WebSocket client disconnected', { totalClients: clients.size });
+      });
+
+      ws.on('error', (error) => {
+        logger.error('WebSocket error', { error: error.message });
+        clients.delete(ws);
+      });
+    });
+
+    // Broadcast function for job updates
+    function broadcast(message) {
+      const data = JSON.stringify(message);
+      clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(data);
+        }
+      });
+    }
+
+    httpServer.listen(HTTP_PORT, () => {
+      logger.info('HTTP/WebSocket server started', { port: HTTP_PORT });
+      console.log(`cm-compute HTTP/WebSocket server listening on port ${HTTP_PORT}`);
     });
 
     // Start Unix socket server
     const server = app.listen(SOCKET_PATH, () => {
       fs.chmodSync(SOCKET_PATH, '0666');
+      logger.info('Unix socket server started', { path: SOCKET_PATH });
       console.log(`cm-compute daemon listening on ${SOCKET_PATH}`);
     });
 
     // Graceful shutdown
     process.on('SIGTERM', async () => {
+      logger.info('SIGTERM received, shutting down gracefully');
       console.log('SIGTERM received, shutting down gracefully');
       server.close();
-      await pgPool.end();
+      await database.close();
       await esClient.close();
+      logger.info('Shutdown complete');
       process.exit(0);
     });
 
   } catch (error) {
+    logger.error('Failed to start cm-compute', { error: error.message, stack: error.stack });
     console.error('Failed to start cm-compute:', error);
     process.exit(1);
   }

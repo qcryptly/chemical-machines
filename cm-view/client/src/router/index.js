@@ -1,7 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import NotebookList from '../views/NotebookList.vue'
-import NotebookView from '../views/NotebookView.vue'
-import VisualizerView from '../views/VisualizerView.vue'
+import WorkspaceView from '../views/WorkspaceView.vue'
 
 const routes = [
   {
@@ -11,13 +10,13 @@ const routes = [
   },
   {
     path: '/notebook/:id',
-    name: 'NotebookView',
-    component: NotebookView
+    name: 'Workspace',
+    component: WorkspaceView
   },
   {
-    path: '/visualize',
-    name: 'Visualize',
-    component: VisualizerView
+    path: '/workspace',
+    name: 'NewWorkspace',
+    component: WorkspaceView
   }
 ]
 

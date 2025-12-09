@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
-    "build:cpp": "node-gyp rebuild"
+    "build:cpp": "node-gyp rebuild",
+    "test": "node src/compute/jobs/test.js",
+    "test:jobs": "node src/compute/jobs/test.js"
   },
   "keywords": [
     "biophysics",
@@ -24,7 +26,8 @@
     "elasticsearch": "^16.7.3",
     "uuid": "^9.0.1",
     "python-shell": "^5.0.0",
-    "node-gyp": "^10.0.1"
+    "node-gyp": "^10.0.1",
+    "ws": "^8.14.2"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"

@@ -32,7 +32,12 @@ docker-compose.override.yml
 *.db
 *.sqlite
 data/
+
+# Logs
 logs/
+*.log
+*.out
+/var/log/cm-compute/
 
 # Python
 *.egg-info/
@@ -47,3 +52,27 @@ build/
 
 # Notes
 notes/
+
+# Vite
+.vite/
+*.local
+
+# Package lock files
+package-lock.json
+**/package-lock.json
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Unix socket files
+*.sock
+
+# Conda environments (if stored locally)
+envs/
+.conda/

@@ -7,6 +7,7 @@ class ComputeQueue {
     this.running = new Map();
     this.workers = [];
     this.maxWorkers = 4;
+    this.workerIdCounter = 0;
   }
 
   enqueue(job, callback) {
@@ -31,10 +32,18 @@ class ComputeQueue {
   }
 
   execute(job) {
+    const workerId = this.workerIdCounter++;
     const worker = fork(path.join(__dirname, 'worker.js'));
 
-    this.running.set(job.id, { worker, job });
+    this.running.set(job.id, { worker, job, workerId });
 
+    // Initialize worker with its ID
+    worker.send({
+      type: 'init',
+      workerId: workerId
+    });
+
+    // Send the job to execute
     worker.send({
       type: 'execute',
       job: {

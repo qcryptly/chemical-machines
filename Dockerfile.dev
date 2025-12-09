@@ -96,8 +96,17 @@ RUN mkdir -p /app/cm-compute /app/cm-view /var/run /var/log/supervisor \
 # Set working directory
 WORKDIR /app
 
+# Copy application code
+COPY cm-compute /app/cm-compute
+COPY cm-view /app/cm-view
+
+# Install Node.js dependencies
+RUN cd /app/cm-compute && npm install --production \
+    && cd /app/cm-view && npm install --production \
+    && cd /app/cm-view/client && npm install && npm run build
+
 # Copy supervisor configuration
-COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+COPY docker/supervisord.dev.conf /etc/supervisor/conf.d/supervisord.conf
 COPY docker/elasticsearch.yml /etc/elasticsearch/elasticsearch.yml
 
 # Create PostgreSQL database and user
@@ -110,7 +119,10 @@ RUN service postgresql start \
 # Update supervisord to use conda environment for cm-compute
 RUN sed -i 's|/usr/bin/node /app/cm-compute|/opt/conda/envs/chemcomp/bin/python /app/cm-compute|g' /etc/supervisor/conf.d/supervisord.conf
 
+RUN npm i -g concurrently nodemon
+
 # Expose ports
 EXPOSE 3000 5432 9200
 
+# Start supervisor
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

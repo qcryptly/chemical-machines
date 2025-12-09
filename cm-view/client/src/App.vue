@@ -4,7 +4,7 @@
       <h1>Chemical Machines</h1>
       <nav>
         <router-link to="/">Notebooks</router-link>
-        <router-link to="/visualize">Visualize</router-link>
+        <router-link to="/workspace">New Workspace</router-link>
       </nav>
     </header>
     <main class="app-main">

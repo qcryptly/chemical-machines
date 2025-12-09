@@ -1,10 +1,8 @@
-version: '3.8'
-
 services:
   chemical-machines:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dev
     container_name: chemical-machines
     runtime: nvidia
     environment:
@@ -13,11 +11,12 @@ services:
       - NODE_ENV=production
     ports:
       - "3000:3000"      # cm-view web interface
+      - "5173:5173"      # cm-view web interface
       - "5432:5432"      # PostgreSQL
       - "9200:9200"      # Elasticsearch
     volumes:
-      - cm_data:/var/lib/chemical-machines
-      - workspace:/workspace
+      - ./:/app
+
     deploy:
       resources:
         reservations:
@@ -26,6 +25,3 @@ services:
               count: all
               capabilities: [gpu]
 
-volumes:
-  cm_data:
-  workspace:

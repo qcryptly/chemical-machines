@@ -8,7 +8,7 @@ const { Client } = require('elasticsearch');
 const axios = require('axios');
 
 const PORT = process.env.PORT || 3000;
-const COMPUTE_URL = process.env.COMPUTE_URL || 'http://localhost:3001';
+const COMPUTE_URL = process.env.COMPUTE_URL || 'http://0.0.0.0:3001';
 
 // Database connections
 const pgPool = new Pool({
@@ -186,6 +186,74 @@ app.get('/api/compute/:jobId', async (req, res) => {
     res.json(response.data);
   } catch (error) {
     console.error('Error fetching compute job:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ================== Conda Environment Proxy ==================
+
+// List environments
+app.get('/api/environments', async (req, res) => {
+  try {
+    const response = await axios.get(`${COMPUTE_URL}/environments`);
+    res.json(response.data);
+  } catch (error) {
+    console.error('Error fetching environments:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get available Python versions
+app.get('/api/environments/python-versions', async (req, res) => {
+  try {
+    const response = await axios.get(`${COMPUTE_URL}/environments/python-versions`);
+    res.json(response.data);
+  } catch (error) {
+    console.error('Error fetching Python versions:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create environment
+app.post('/api/environments', async (req, res) => {
+  try {
+    const response = await axios.post(`${COMPUTE_URL}/environments`, req.body);
+    res.json(response.data);
+  } catch (error) {
+    console.error('Error creating environment:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete environment
+app.delete('/api/environments/:name', async (req, res) => {
+  try {
+    const response = await axios.delete(`${COMPUTE_URL}/environments/${req.params.name}`);
+    res.json(response.data);
+  } catch (error) {
+    console.error('Error deleting environment:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get packages in environment
+app.get('/api/environments/:name/packages', async (req, res) => {
+  try {
+    const response = await axios.get(`${COMPUTE_URL}/environments/${req.params.name}/packages`);
+    res.json(response.data);
+  } catch (error) {
+    console.error('Error fetching packages:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Install packages
+app.post('/api/environments/:name/packages', async (req, res) => {
+  try {
+    const response = await axios.post(`${COMPUTE_URL}/environments/${req.params.name}/packages`, req.body);
+    res.json(response.data);
+  } catch (error) {
+    console.error('Error installing packages:', error);
     res.status(500).json({ error: error.message });
   }
 });

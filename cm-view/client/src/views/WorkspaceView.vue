@@ -1,61 +1,177 @@
 <template>
   <div class="workspace">
-    <!-- Left Sidebar: Environments -->
-    <div class="env-sidebar" :class="{ collapsed: !sidebarOpen }">
+    <!-- Left Sidebar with Tabs -->
+    <div class="left-sidebar" :class="{ collapsed: !sidebarOpen }">
       <div class="sidebar-header">
-        <span v-if="sidebarOpen">Environments</span>
+        <div class="sidebar-tabs" v-if="sidebarOpen">
+          <button
+            :class="{ active: sidebarTab === 'files' }"
+            @click="sidebarTab = 'files'"
+            title="Files"
+          >Files</button>
+          <button
+            :class="{ active: sidebarTab === 'envs' }"
+            @click="sidebarTab = 'envs'"
+            title="Environments"
+          >Envs</button>
+        </div>
         <button @click="sidebarOpen = !sidebarOpen" class="toggle-btn">
           {{ sidebarOpen ? '◀' : '▶' }}
         </button>
       </div>
 
-      <div class="sidebar-content" v-if="sidebarOpen">
-        <!-- Current Environment -->
-        <div class="current-env">
-          <label>Active:</label>
-          <select v-model="selectedEnvironment" @change="saveNotebook">
-            <option v-for="env in environments" :key="env.name" :value="env.name">
-              {{ env.name }} ({{ env.pythonVersion }})
-            </option>
-          </select>
+      <!-- File Browser Tab -->
+      <div class="sidebar-content" v-if="sidebarOpen && sidebarTab === 'files'">
+        <FileBrowser
+          @file-open="handleFileOpen"
+          @file-select="handleFileSelect"
+        />
+      </div>
+
+      <!-- Environments Tab -->
+      <div class="sidebar-content env-panel" v-if="sidebarOpen && sidebarTab === 'envs'">
+        <!-- Sub-tabs for Python/C++ -->
+        <div class="env-sub-tabs">
+          <button
+            :class="{ active: envSubTab === 'python' }"
+            @click="envSubTab = 'python'"
+          >Python</button>
+          <button
+            :class="{ active: envSubTab === 'cpp' }"
+            @click="envSubTab = 'cpp'"
+          >C++</button>
         </div>
 
-        <!-- Environment List -->
-        <div class="env-list">
-          <div
-            v-for="env in environments"
-            :key="env.name"
-            class="env-item"
-            :class="{ active: env.name === selectedEnvironment }"
-            @click="selectedEnvironment = env.name"
-          >
-            <div class="env-info">
-              <span class="env-name">{{ env.name }}</span>
-              <span class="env-python">Python {{ env.pythonVersion }}</span>
-            </div>
-            <div class="env-meta">
-              <span class="pkg-count">{{ env.packageCount }} packages</span>
-              <button
-                v-if="!env.isBase && env.name !== 'chemcomp'"
-                @click.stop="deleteEnvironment(env.name)"
-                class="delete-env-btn"
-                title="Delete environment"
-              >&times;</button>
+        <!-- Python Environments -->
+        <template v-if="envSubTab === 'python'">
+          <div class="current-env">
+            <label>Active:</label>
+            <select v-model="selectedEnvironment">
+              <option v-for="env in environments" :key="env.name" :value="env.name">
+                {{ env.name }} ({{ env.pythonVersion }})
+              </option>
+            </select>
+          </div>
+
+          <div class="env-list">
+            <div
+              v-for="env in environments"
+              :key="env.name"
+              class="env-item"
+              :class="{ active: env.name === selectedEnvironment }"
+              @click="selectedEnvironment = env.name"
+            >
+              <div class="env-info">
+                <span class="env-name">{{ env.name }}</span>
+                <span class="env-python">Python {{ env.pythonVersion }}</span>
+              </div>
+              <div class="env-meta">
+                <span class="pkg-count">{{ env.packageCount }} packages</span>
+                <button
+                  v-if="!env.isBase && env.name !== 'chemcomp'"
+                  @click.stop="deleteEnvironment(env.name)"
+                  class="delete-env-btn"
+                  title="Delete environment"
+                >&times;</button>
+              </div>
             </div>
           </div>
-        </div>
 
-        <!-- Create New Environment -->
-        <div class="new-env-section">
-          <button @click="showCreateDialog = true" class="create-env-btn">
-            + New Environment
-          </button>
-        </div>
+          <div class="new-env-section">
+            <button @click="showCreateDialog = true" class="create-env-btn">
+              + New Python Env
+            </button>
+          </div>
 
-        <!-- Refresh Button -->
-        <button @click="loadEnvironments" class="refresh-btn">
-          Refresh
-        </button>
+          <button @click="loadEnvironments" class="refresh-btn">Refresh</button>
+        </template>
+
+        <!-- C++ Environments -->
+        <template v-if="envSubTab === 'cpp'">
+          <!-- C++ System Libraries -->
+          <div class="env-section-header">System Libraries</div>
+          <div class="current-env" v-if="cppEnvironments.length > 0">
+            <label>Active:</label>
+            <select v-model="selectedCppEnvironment">
+              <option value="">None</option>
+              <option v-for="env in cppEnvironments" :key="env.name" :value="env.name">
+                {{ env.name }}
+              </option>
+            </select>
+          </div>
+
+          <div class="env-list">
+            <div
+              v-for="env in cppEnvironments"
+              :key="env.name"
+              class="env-item"
+              :class="{ active: env.name === selectedCppEnvironment }"
+              @click="selectedCppEnvironment = env.name"
+            >
+              <div class="env-info">
+                <span class="env-name">{{ env.name }}</span>
+                <span class="env-lang">C++</span>
+              </div>
+              <div class="env-meta">
+                <span class="pkg-count">{{ env.packages?.length || 0 }} packages</span>
+                <button
+                  @click.stop="deleteCppEnvironment(env.name)"
+                  class="delete-env-btn"
+                  title="Delete environment"
+                >&times;</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="new-env-section">
+            <button @click="showCppDialog = true" class="create-env-btn">
+              + New C++ Env
+            </button>
+          </div>
+
+          <!-- Vendor Libraries -->
+          <div class="env-section-header">Vendor Libraries</div>
+          <div class="current-env" v-if="vendorEnvironments.length > 0">
+            <label>Active:</label>
+            <select v-model="selectedVendorEnvironment">
+              <option value="">None</option>
+              <option v-for="env in vendorEnvironments" :key="env.name" :value="env.name">
+                {{ env.name }}
+              </option>
+            </select>
+          </div>
+
+          <div class="env-list">
+            <div
+              v-for="env in vendorEnvironments"
+              :key="env.name"
+              class="env-item vendor"
+              :class="{ active: env.name === selectedVendorEnvironment }"
+              @click="selectedVendorEnvironment = env.name"
+            >
+              <div class="env-info">
+                <span class="env-name">{{ env.name }}</span>
+                <span class="env-lang">Vendor</span>
+              </div>
+              <div class="env-meta">
+                <span class="pkg-count">{{ env.installations?.length || 0 }} installs</span>
+                <button
+                  @click.stop="deleteVendorEnvironment(env.name)"
+                  class="delete-env-btn"
+                  title="Delete environment"
+                >&times;</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="new-env-section">
+            <button @click="showVendorDialog = true" class="create-env-btn vendor-btn">
+              + Build from Source
+            </button>
+          </div>
+
+          <button @click="loadCppEnvironments(); loadVendorEnvironments()" class="refresh-btn">Refresh</button>
+        </template>
       </div>
     </div>
 
@@ -89,60 +205,69 @@
       <!-- Bottom Panel: Code Cells -->
       <div class="notebook-panel">
         <div class="panel-header">
-          <input
-            v-model="notebookName"
-            @blur="saveNotebook"
-            class="notebook-title"
-            placeholder="Untitled Notebook"
-          />
+          <div class="file-info" v-if="currentFile">
+            <span class="file-name" :class="{ modified: hasUnsavedChanges }">
+              {{ currentFile.name }}{{ hasUnsavedChanges ? ' •' : '' }}
+            </span>
+            <span class="file-path">{{ currentFile.path }}</span>
+          </div>
+          <div class="file-info" v-else>
+            <span class="file-name empty">No file open</span>
+            <span class="file-path">Open a file from the sidebar</span>
+          </div>
           <div class="header-right">
             <span class="env-badge" :title="'Using ' + selectedEnvironment">
               {{ selectedEnvironment }}
             </span>
-            <button @click="addCell">+ Cell</button>
+            <button v-if="currentFile" @click="saveFile" class="save-btn" :disabled="!hasUnsavedChanges" title="Save file (Ctrl+S)">
+              Save
+            </button>
+            <button v-if="currentFile" @click="addCell" title="Add new cell">+ Cell</button>
+            <button v-if="currentFile" @click="closeFile" class="close-btn" title="Close file">×</button>
           </div>
         </div>
 
-        <div class="cells">
-          <div
+        <div class="cells" v-if="currentFile && cells.length > 0">
+          <CodeCell
             v-for="(cell, index) in cells"
             :key="cell.id"
-            class="cell"
-          >
-            <div class="cell-toolbar">
-              <span class="cell-number">[{{ index + 1 }}]</span>
-              <button @click="executeCell(index)" class="run-btn" title="Run cell (Ctrl+Enter)">
-                <span v-if="cell.status === 'running'" class="spinner"></span>
-                <span v-else>&#9654;</span>
-              </button>
-              <button @click="deleteCell(index)" class="delete-btn" title="Delete cell">&times;</button>
-            </div>
-
-            <div class="cell-input">
-              <textarea
-                v-model="cell.content"
-                @blur="saveNotebook"
-                @keydown.ctrl.enter="executeCell(index)"
-                placeholder="# Enter Python code... (Ctrl+Enter to run)"
-                rows="3"
-              />
-            </div>
-
-            <div class="cell-output" v-if="cell.output || cell.status === 'running'">
-              <div v-if="cell.status === 'running'" class="running-indicator">
-                Running...
-              </div>
-              <pre v-else :class="{ error: cell.status === 'error' }">{{ cell.output }}</pre>
-            </div>
-          </div>
+            :cell="cell"
+            :index="index"
+            :environments="environmentNames"
+            :selected-environment="selectedEnvironment"
+            :cpp-environments="cppEnvironmentNames"
+            :selected-cpp-environment="selectedCppEnvironment"
+            :vendor-environments="vendorEnvironmentNames"
+            :selected-vendor-environment="selectedVendorEnvironment"
+            @update="updateCell(index, $event)"
+            @run="executeCell(index)"
+            @delete="deleteCell(index)"
+            @environment-change="handleCellEnvironmentChange(index, $event)"
+            @cpp-environment-change="handleCellCppEnvironmentChange(index, $event)"
+            @vendor-environment-change="handleCellVendorEnvironmentChange(index, $event)"
+          />
+        </div>
+        <div class="no-file-message" v-else-if="!currentFile">
+          <p>Open a file from the Files sidebar to start editing</p>
+          <p class="hint">Use <code># %%</code> in Python/Bash or <code>// %%</code> in C++ to create cell boundaries</p>
         </div>
       </div>
     </div>
 
     <!-- Create Environment Dialog -->
     <div class="dialog-overlay" v-if="showCreateDialog" @click.self="showCreateDialog = false">
-      <div class="dialog">
-        <h3>Create New Environment</h3>
+      <div class="dialog" :class="{ expanded: dialogExpanded }">
+        <div class="dialog-header">
+          <h3>Create New Environment</h3>
+          <button
+            v-if="createLogs.length > 0"
+            @click="dialogExpanded = !dialogExpanded"
+            class="expand-btn"
+            :title="dialogExpanded ? 'Collapse' : 'Expand to see full log'"
+          >
+            {{ dialogExpanded ? '⊟' : '⊞' }}
+          </button>
+        </div>
 
         <div class="form-group">
           <label>Environment Name:</label>
@@ -172,49 +297,94 @@
         </div>
 
         <div class="dialog-actions">
-          <button @click="showCreateDialog = false" class="cancel-btn">Cancel</button>
-          <button @click="createEnvironment" class="create-btn" :disabled="!newEnvName">
-            Create
+          <button @click="showCreateDialog = false" class="cancel-btn" :disabled="isCreating">Cancel</button>
+          <button @click="createEnvironment" class="create-btn" :disabled="!newEnvName || isCreating">
+            {{ isCreating ? 'Creating...' : 'Create' }}
           </button>
         </div>
 
-        <div class="dialog-status" v-if="createStatus">
+        <div class="create-log" v-if="createLogs.length > 0">
+          <div class="log-header">{{ createStatus }}</div>
+          <div class="log-output" ref="logOutput">
+            <div v-for="(log, i) in createLogs" :key="i" :class="['log-line', log.type]">
+              {{ log.message }}
+            </div>
+          </div>
+        </div>
+        <div class="dialog-status" v-else-if="createStatus">
           {{ createStatus }}
         </div>
       </div>
     </div>
+
+    <!-- C++ Environment Dialog -->
+    <CppEnvironmentDialog
+      v-if="showCppDialog"
+      @close="showCppDialog = false"
+      @created="handleCppEnvCreated"
+    />
+
+    <!-- Vendor Environment Dialog -->
+    <VendorEnvironmentDialog
+      v-if="showVendorDialog"
+      @close="showVendorDialog = false"
+      @created="handleVendorEnvCreated"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
+import CodeCell from '../components/CodeCell.vue'
+import FileBrowser from '../components/FileBrowser.vue'
+import CppEnvironmentDialog from '../components/CppEnvironmentDialog.vue'
+import VendorEnvironmentDialog from '../components/VendorEnvironmentDialog.vue'
 
 const route = useRoute()
 const viewport = ref(null)
 
 // Sidebar state
 const sidebarOpen = ref(true)
+const sidebarTab = ref('files')
 
-// Environment state
+// Environment state (Python/Conda)
 const environments = ref([])
 const selectedEnvironment = ref('chemcomp')
 const pythonVersions = ref(['3.12', '3.11', '3.10', '3.9', '3.8'])
 
-// Create environment dialog
+// C++ Environment state
+const cppEnvironments = ref([])
+const vendorEnvironments = ref([])
+const selectedCppEnvironment = ref('')
+const selectedVendorEnvironment = ref('')
+const envSubTab = ref('python')  // 'python' or 'cpp'
+
+// Computed environment names for cell selector
+const environmentNames = computed(() => environments.value.map(e => e.name))
+const cppEnvironmentNames = computed(() => cppEnvironments.value.map(e => e.name))
+const vendorEnvironmentNames = computed(() => vendorEnvironments.value.map(e => e.name))
+
+// Create environment dialogs
 const showCreateDialog = ref(false)
+const showCppDialog = ref(false)
+const showVendorDialog = ref(false)
 const newEnvName = ref('')
 const newEnvPython = ref('3.12')
 const newEnvPackages = ref('')
 const createStatus = ref('')
+const createLogs = ref([])
+const isCreating = ref(false)
+const logOutput = ref(null)
+const dialogExpanded = ref(false)
 
-// Notebook state
-const notebookId = ref(null)
-const notebookName = ref('Untitled Notebook')
+// File editor state
+const currentFile = ref(null)  // { path, name, language }
 const cells = ref([])
+const hasUnsavedChanges = ref(false)
 
 // Visualizer state
 const currentMolecule = ref(null)
@@ -257,35 +427,225 @@ async function loadPythonVersions() {
   }
 }
 
-async function createEnvironment() {
-  if (!newEnvName.value) return
+/**
+ * Process terminal output for cell, handling carriage returns properly.
+ * When \r is used (common for progress bars), replace the current line.
+ */
+function appendCellOutput(cell, text) {
+  if (!text) return
 
-  createStatus.value = 'Creating environment...'
+  const currentOutput = cell.output || ''
+
+  // Check if this chunk starts with \r (carriage return) - means "go back to line start"
+  if (text.includes('\r') && !text.includes('\n')) {
+    // Pure \r update - replace the last line
+    const lines = currentOutput.split('\n')
+    // Get the text after the last \r
+    const newText = text.split('\r').filter(p => p.length > 0).pop() || ''
+    if (lines.length > 0) {
+      lines[lines.length - 1] = newText
+      cell.output = lines.join('\n')
+    } else {
+      cell.output = newText
+    }
+  } else if (text.includes('\r')) {
+    // Mixed \r and \n - process line by line
+    const chunks = text.split('\n')
+    let result = currentOutput
+
+    for (const chunk of chunks) {
+      if (chunk.includes('\r')) {
+        // Take the last part after \r
+        const parts = chunk.split('\r')
+        const finalPart = parts.filter(p => p.length > 0).pop() || ''
+        const lines = result.split('\n')
+        if (lines.length > 0) {
+          lines[lines.length - 1] = finalPart
+          result = lines.join('\n')
+        } else {
+          result = finalPart
+        }
+      } else if (chunk) {
+        result = result ? result + '\n' + chunk : chunk
+      } else if (text.includes('\n')) {
+        // Empty chunk from split means there was a newline
+        result = result + '\n'
+      }
+    }
+    cell.output = result
+  } else {
+    // No \r, just append
+    cell.output = currentOutput + text
+  }
+
+  // Clean up ANSI escape codes
+  cell.output = cell.output.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
+}
+
+/**
+ * Process terminal output handling carriage returns and newlines properly
+ * Conda uses \r to update spinners/progress in place
+ */
+function appendTerminalOutput(text, logType = 'progress') {
+  if (!text) return
+
+  // Split by newlines, but also handle carriage returns
+  const lines = text.split(/\n/)
+
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i]
+
+    // Handle carriage return - update the last line instead of adding new one
+    if (line.includes('\r')) {
+      const parts = line.split('\r')
+      // Take the last non-empty part (what should be displayed after \r overwrites)
+      line = parts.filter(p => p.length > 0).pop() || ''
+    }
+
+    // Skip empty lines unless it's between content
+    if (!line && i === lines.length - 1) continue
+
+    // Clean up ANSI escape codes (color codes, cursor movement, etc.)
+    line = line.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
+
+    // If this is a continuation (same line update), update the last log entry
+    if (createLogs.value.length > 0 && text.startsWith('\r')) {
+      const lastLog = createLogs.value[createLogs.value.length - 1]
+      if (lastLog.type === logType && line) {
+        lastLog.message = line
+        continue
+      }
+    }
+
+    if (line) {
+      createLogs.value.push({ type: logType, message: line })
+    }
+  }
+}
+
+async function createEnvironment() {
+  if (!newEnvName.value || isCreating.value) return
+
+  isCreating.value = true
+  createStatus.value = 'Starting...'
+  createLogs.value = []
+
+  const envName = newEnvName.value
+  const packages = newEnvPackages.value.trim().split(/\s+/).filter(p => p)
 
   try {
-    const packages = newEnvPackages.value.trim().split(/\s+/).filter(p => p)
-    await axios.post('/api/environments', {
-      name: newEnvName.value,
+    // POST to create environment job
+    const response = await axios.post('/api/environments', {
+      name: envName,
       pythonVersion: newEnvPython.value,
       packages
     })
 
-    createStatus.value = `Creating '${newEnvName.value}'... This may take a few minutes.`
+    if (response.data.error) {
+      createStatus.value = `Error: ${response.data.error}`
+      isCreating.value = false
+      return
+    }
 
-    // Poll for environment to appear
-    setTimeout(async () => {
-      await loadEnvironments()
-      if (environments.value.some(e => e.name === newEnvName.value)) {
-        selectedEnvironment.value = newEnvName.value
-        showCreateDialog.value = false
-        createStatus.value = ''
-        newEnvName.value = ''
-        newEnvPackages.value = ''
+    const { jobId } = response.data
+    createStatus.value = response.data.message || `Creating environment '${envName}'...`
+
+    // Subscribe to job output via WebSocket
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const wsUrl = `${wsProtocol}//${window.location.host}/ws`
+    const ws = new WebSocket(wsUrl)
+
+    ws.onopen = () => {
+      // Subscribe to this job's output
+      ws.send(JSON.stringify({
+        type: 'subscribe',
+        jobId
+      }))
+    }
+
+    ws.onmessage = async (event) => {
+      try {
+        const data = JSON.parse(event.data)
+
+        if (data.type === 'subscribed') {
+          createLogs.value.push({ type: 'progress', message: 'Connected to job stream...' })
+        } else if (data.type === 'job_output') {
+          // Handle streamed output from job
+          const { stream, data: outputData } = data
+          const streamLower = stream?.toLowerCase()
+
+          if (streamLower === 'stdout' || streamLower === 'stderr') {
+            const logType = streamLower === 'stderr' ? 'error' : 'progress'
+            // Process terminal output - handle carriage returns and newlines
+            appendTerminalOutput(outputData, logType)
+          } else if (streamLower === 'result') {
+            createStatus.value = `Environment '${envName}' created successfully!`
+            createLogs.value.push({ type: 'success', message: `Environment '${envName}' created successfully!` })
+
+            // Refresh environments and select the new one
+            await loadEnvironments()
+            selectedEnvironment.value = envName
+
+            // Close dialog after short delay
+            setTimeout(() => {
+              showCreateDialog.value = false
+              createStatus.value = ''
+              createLogs.value = []
+              newEnvName.value = ''
+              newEnvPackages.value = ''
+              isCreating.value = false
+              dialogExpanded.value = false
+            }, 1500)
+
+            ws.close()
+          } else if (streamLower === 'error') {
+            createStatus.value = `Error: ${outputData}`
+            createLogs.value.push({ type: 'error', message: outputData })
+            isCreating.value = false
+            ws.close()
+          } else if (streamLower === 'complete') {
+            // Job completed (with exit code)
+            if (!createStatus.value.includes('successfully')) {
+              createStatus.value = 'Job completed'
+            }
+            isCreating.value = false
+            ws.close()
+          }
+
+          // Auto-scroll log output
+          await nextTick()
+          if (logOutput.value) {
+            logOutput.value.scrollTop = logOutput.value.scrollHeight
+          }
+        } else if (data.type === 'error') {
+          createStatus.value = `Error: ${data.error}`
+          createLogs.value.push({ type: 'error', message: data.error })
+          isCreating.value = false
+          ws.close()
+        }
+      } catch (e) {
+        console.error('Error parsing WebSocket message:', e)
       }
-    }, 5000)
+    }
+
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error)
+      createStatus.value = 'WebSocket connection error'
+      createLogs.value.push({ type: 'error', message: 'WebSocket connection error' })
+      isCreating.value = false
+    }
+
+    ws.onclose = () => {
+      // Only set isCreating false if it wasn't already handled
+      if (isCreating.value && !createStatus.value.includes('successfully')) {
+        isCreating.value = false
+      }
+    }
 
   } catch (error) {
     createStatus.value = `Error: ${error.response?.data?.error || error.message}`
+    createLogs.value.push({ type: 'error', message: error.response?.data?.error || error.message })
+    isCreating.value = false
   }
 }
 
@@ -304,104 +664,382 @@ async function deleteEnvironment(name) {
   }
 }
 
-// ================== Notebook Functions ==================
+// ================== C++ Environment Functions ==================
 
-async function loadNotebook() {
-  if (!route.params.id) {
-    addCell()
-    return
-  }
-
-  notebookId.value = route.params.id
-
+async function loadCppEnvironments() {
   try {
-    const response = await axios.get(`/api/notebooks/${route.params.id}`)
-    notebookName.value = response.data.name
-    cells.value = JSON.parse(response.data.cells || '[]')
-
-    if (cells.value.length === 0) {
-      addCell()
-    }
+    const response = await axios.get('/api/cpp-environments')
+    cppEnvironments.value = response.data.environments || []
   } catch (error) {
-    console.error('Error loading notebook:', error)
-    addCell()
+    console.error('Error loading C++ environments:', error)
+    cppEnvironments.value = []
   }
 }
 
-async function saveNotebook() {
-  if (!notebookId.value) return
+async function loadVendorEnvironments() {
+  try {
+    const response = await axios.get('/api/vendor-environments')
+    vendorEnvironments.value = response.data.environments || []
+  } catch (error) {
+    console.error('Error loading vendor environments:', error)
+    vendorEnvironments.value = []
+  }
+}
+
+async function deleteCppEnvironment(name) {
+  if (!confirm(`Delete C++ environment '${name}'?`)) return
 
   try {
-    await axios.put(`/api/notebooks/${notebookId.value}`, {
-      name: notebookName.value,
-      cells: cells.value
-    })
+    await axios.delete(`/api/cpp-environments/${name}`)
+    await loadCppEnvironments()
+    if (selectedCppEnvironment.value === name) {
+      selectedCppEnvironment.value = ''
+    }
   } catch (error) {
-    console.error('Error saving notebook:', error)
+    console.error('Error deleting C++ environment:', error)
+    alert(`Failed to delete: ${error.response?.data?.error || error.message}`)
   }
+}
+
+async function deleteVendorEnvironment(name) {
+  if (!confirm(`Delete vendor environment '${name}'? This will remove all installed libraries.`)) return
+
+  try {
+    await axios.delete(`/api/vendor-environments/${name}`)
+    await loadVendorEnvironments()
+    if (selectedVendorEnvironment.value === name) {
+      selectedVendorEnvironment.value = ''
+    }
+  } catch (error) {
+    console.error('Error deleting vendor environment:', error)
+    alert(`Failed to delete: ${error.response?.data?.error || error.message}`)
+  }
+}
+
+function handleCppEnvCreated(name) {
+  loadCppEnvironments()
+  selectedCppEnvironment.value = name
+}
+
+function handleVendorEnvCreated(name) {
+  loadVendorEnvironments()
+  selectedVendorEnvironment.value = name
+}
+
+// ================== File Editor Functions ==================
+
+// Cell delimiters by language
+const CELL_DELIMITERS = {
+  python: /^# %%(.*)$/,
+  cpp: /^\/\/ %%(.*)$/,
+  bash: /^# %%(.*)$/
+}
+
+/**
+ * Get the language from file extension
+ */
+function getLanguageFromExt(filename) {
+  const ext = filename.split('.').pop()?.toLowerCase()
+  if (ext === 'cpp' || ext === 'c' || ext === 'h' || ext === 'hpp') return 'cpp'
+  if (ext === 'sh' || ext === 'bash') return 'bash'
+  return 'python'
+}
+
+/**
+ * Get the cell delimiter prefix for a language
+ */
+function getCellDelimiterPrefix(language) {
+  return language === 'cpp' ? '// %%' : '# %%'
+}
+
+/**
+ * Parse file content into cells based on cell delimiters
+ */
+function parseFileIntoCells(content, language) {
+  const delimiter = CELL_DELIMITERS[language] || CELL_DELIMITERS.python
+  const lines = content.split('\n')
+  const parsedCells = []
+  let currentCell = { content: '', title: '' }
+  let inCell = false
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    const match = line.match(delimiter)
+
+    if (match) {
+      // Save previous cell if it has content
+      if (inCell && currentCell.content.trim()) {
+        parsedCells.push({
+          id: Date.now() + parsedCells.length,
+          type: 'code',
+          language,
+          environment: selectedEnvironment.value,
+          content: currentCell.content.trim(),
+          title: currentCell.title.trim(),
+          output: null,
+          status: null
+        })
+      }
+      // Start new cell
+      currentCell = { content: '', title: match[1] || '' }
+      inCell = true
+    } else if (inCell) {
+      currentCell.content += (currentCell.content ? '\n' : '') + line
+    } else {
+      // Content before first delimiter - treat as first cell
+      currentCell.content += (currentCell.content ? '\n' : '') + line
+    }
+  }
+
+  // Don't forget the last cell
+  if (currentCell.content.trim()) {
+    parsedCells.push({
+      id: Date.now() + parsedCells.length,
+      type: 'code',
+      language,
+      environment: selectedEnvironment.value,
+      content: currentCell.content.trim(),
+      title: currentCell.title.trim(),
+      output: null,
+      status: null
+    })
+  }
+
+  // If no cells found, create one with all content
+  if (parsedCells.length === 0) {
+    parsedCells.push({
+      id: Date.now(),
+      type: 'code',
+      language,
+      environment: selectedEnvironment.value,
+      content: content,
+      title: '',
+      output: null,
+      status: null
+    })
+  }
+
+  return parsedCells
+}
+
+/**
+ * Combine cells back into file content with delimiters
+ */
+function cellsToFileContent(cellsArray, language) {
+  const delimiterPrefix = getCellDelimiterPrefix(language)
+
+  if (cellsArray.length === 1 && !cellsArray[0].title) {
+    // Single cell with no title - just return content without delimiter
+    return cellsArray[0].content
+  }
+
+  return cellsArray.map((cell, index) => {
+    const title = cell.title || (index === 0 ? '' : `Cell ${index + 1}`)
+    const delimiter = `${delimiterPrefix}${title ? ' ' + title : ''}`
+    return `${delimiter}\n${cell.content}`
+  }).join('\n\n')
+}
+
+/**
+ * Save current file
+ */
+async function saveFile() {
+  if (!currentFile.value) return
+
+  try {
+    const content = cellsToFileContent(cells.value, currentFile.value.language)
+    await axios.put(`/api/files/${encodeURIComponent(currentFile.value.path)}`, {
+      content
+    })
+    hasUnsavedChanges.value = false
+  } catch (error) {
+    console.error('Error saving file:', error)
+    alert(`Failed to save: ${error.response?.data?.error || error.message}`)
+  }
+}
+
+/**
+ * Close current file
+ */
+function closeFile() {
+  if (hasUnsavedChanges.value) {
+    if (!confirm('You have unsaved changes. Close anyway?')) return
+  }
+  currentFile.value = null
+  cells.value = []
+  hasUnsavedChanges.value = false
 }
 
 function addCell() {
+  // Inherit language from current file or last cell
+  const language = currentFile.value?.language || cells.value[cells.value.length - 1]?.language || 'python'
+  const environment = cells.value[cells.value.length - 1]?.environment || selectedEnvironment.value
+
   cells.value.push({
     id: Date.now(),
     type: 'code',
+    language,
+    environment,
     content: '',
+    title: '',
     output: null,
     status: null
   })
-  saveNotebook()
+  hasUnsavedChanges.value = true
+}
+
+function updateCell(index, { content, language, environment, cppEnvironment, vendorEnvironment, compiler, cppStandard }) {
+  const cell = cells.value[index]
+  if (content !== undefined && content !== cell.content) {
+    cell.content = content
+    hasUnsavedChanges.value = true
+  }
+  if (language !== undefined) cell.language = language
+  if (environment !== undefined) cell.environment = environment
+  if (cppEnvironment !== undefined) cell.cppEnvironment = cppEnvironment
+  if (vendorEnvironment !== undefined) cell.vendorEnvironment = vendorEnvironment
+  if (compiler !== undefined) cell.compiler = compiler
+  if (cppStandard !== undefined) cell.cppStandard = cppStandard
+}
+
+function handleCellEnvironmentChange(index, environment) {
+  const cell = cells.value[index]
+  cell.environment = environment
+}
+
+function handleCellCppEnvironmentChange(index, cppEnvironment) {
+  const cell = cells.value[index]
+  cell.cppEnvironment = cppEnvironment
+}
+
+function handleCellVendorEnvironmentChange(index, vendorEnvironment) {
+  const cell = cells.value[index]
+  cell.vendorEnvironment = vendorEnvironment
 }
 
 function deleteCell(index) {
   cells.value.splice(index, 1)
-  if (cells.value.length === 0) {
+  if (cells.value.length === 0 && currentFile.value) {
     addCell()
   }
-  saveNotebook()
+  hasUnsavedChanges.value = true
 }
 
 async function executeCell(index) {
   const cell = cells.value[index]
   cell.status = 'running'
-  cell.output = null
+  cell.output = ''
 
   try {
-    const response = await axios.post('/api/compute', {
-      type: 'execute',
-      params: {
+    // Determine job type and params based on language
+    const language = cell.language || 'python'
+    let jobType, jobParams
+
+    if (language === 'cpp') {
+      // C++ execution
+      jobType = 'execute_cpp'
+      jobParams = {
         code: cell.content,
-        environment: selectedEnvironment.value
+        cppEnvironment: cell.cppEnvironment || selectedCppEnvironment.value || '',
+        vendorEnvironment: cell.vendorEnvironment || selectedVendorEnvironment.value || '',
+        compiler: cell.compiler || 'clang++',
+        cppStandard: cell.cppStandard || 'c++23'
       }
+    } else {
+      // Python/Bash execution
+      jobType = 'execute'
+      jobParams = {
+        code: cell.content,
+        environment: cell.environment || selectedEnvironment.value,
+        language
+      }
+    }
+
+    // POST to create the job
+    const response = await axios.post('/api/compute', {
+      type: jobType,
+      params: jobParams
     })
 
-    cell.jobId = response.data.jobId
-    pollJobStatus(cell)
+    if (response.data.error) {
+      cell.output = `Error: ${response.data.error}`
+      cell.status = 'error'
+      return
+    }
+
+    const { jobId } = response.data
+    cell.jobId = jobId
+
+    // Subscribe to job output via WebSocket
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const wsUrl = `${wsProtocol}//${window.location.host}/ws`
+    const ws = new WebSocket(wsUrl)
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({
+        type: 'subscribe',
+        jobId
+      }))
+    }
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+
+        if (data.type === 'subscribed') {
+          // Successfully subscribed, job output will start streaming
+        } else if (data.type === 'job_output') {
+          const { stream, data: outputData } = data
+          const streamLower = stream?.toLowerCase()
+
+          if (streamLower === 'stdout') {
+            // Append stdout to cell output, handling \r for progress updates
+            appendCellOutput(cell, outputData)
+          } else if (streamLower === 'stderr') {
+            // Append stderr, handling \r for progress updates
+            appendCellOutput(cell, outputData)
+          } else if (streamLower === 'result') {
+            // Job completed with result
+            handleJobResult(cell, outputData)
+            ws.close()
+          } else if (streamLower === 'error') {
+            cell.output = (cell.output || '') + `\nError: ${outputData}`
+            cell.status = 'error'
+            ws.close()
+          } else if (streamLower === 'complete') {
+            // Job finished (exit code received)
+            if (cell.status === 'running') {
+              cell.status = 'completed'
+            }
+            ws.close()
+          }
+        } else if (data.type === 'error') {
+          cell.output = `Error: ${data.error}`
+          cell.status = 'error'
+          ws.close()
+        }
+      } catch (e) {
+        console.error('Error parsing WebSocket message:', e)
+      }
+    }
+
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error)
+      cell.output = (cell.output || '') + '\nWebSocket connection error'
+      cell.status = 'error'
+    }
+
+    ws.onclose = () => {
+      // Ensure status is set if not already
+      if (cell.status === 'running') {
+        cell.status = 'completed'
+      }
+    }
+
   } catch (error) {
     cell.output = `Error: ${error.message}`
     cell.status = 'error'
   }
-}
-
-async function pollJobStatus(cell) {
-  const interval = setInterval(async () => {
-    try {
-      const response = await axios.get(`/api/compute/${cell.jobId}`)
-      const job = response.data
-
-      if (job.status === 'completed') {
-        clearInterval(interval)
-        handleJobResult(cell, job.result)
-      } else if (job.status === 'failed') {
-        cell.output = `Error: ${job.result?.error || 'Unknown error'}`
-        cell.status = 'error'
-        clearInterval(interval)
-      }
-    } catch (error) {
-      cell.output = `Error: ${error.message}`
-      cell.status = 'error'
-      clearInterval(interval)
-    }
-  }, 1000)
 }
 
 function handleJobResult(cell, result) {
@@ -431,6 +1069,46 @@ function handleJobResult(cell, result) {
     }
   } catch {
     cell.output = String(result)
+  }
+}
+
+// ================== File Browser Functions ==================
+
+async function handleFileOpen(file) {
+  // Check for unsaved changes
+  if (hasUnsavedChanges.value) {
+    if (!confirm('You have unsaved changes. Open new file anyway?')) return
+  }
+
+  // Open file in the editor
+  await openFile(file)
+}
+
+function handleFileSelect(file) {
+  // Just selection, no action needed
+  console.log('Selected file:', file.path)
+}
+
+async function openFile(file) {
+  try {
+    const response = await axios.get(`/api/files/${encodeURIComponent(file.path)}`)
+    if (response.data.type === 'file') {
+      const language = getLanguageFromExt(file.name)
+
+      // Set current file
+      currentFile.value = {
+        path: file.path,
+        name: file.name,
+        language
+      }
+
+      // Parse file content into cells
+      cells.value = parseFileIntoCells(response.data.content || '', language)
+      hasUnsavedChanges.value = false
+    }
+  } catch (error) {
+    console.error('Error opening file:', error)
+    alert(`Failed to open file: ${error.response?.data?.error || error.message}`)
   }
 }
 
@@ -782,16 +1460,32 @@ function stopResize() {
   document.removeEventListener('mouseup', stopResize)
 }
 
+// ================== Keyboard Shortcuts ==================
+
+function handleKeydown(e) {
+  // Ctrl+S or Cmd+S to save
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    e.preventDefault()
+    if (currentFile.value && hasUnsavedChanges.value) {
+      saveFile()
+    }
+  }
+}
+
 // ================== Lifecycle ==================
 
 onMounted(async () => {
   await Promise.all([
-    loadNotebook(),
     loadEnvironments(),
-    loadPythonVersions()
+    loadPythonVersions(),
+    loadCppEnvironments(),
+    loadVendorEnvironments()
   ])
   await nextTick()
   initThree()
+
+  // Add keyboard shortcut listener
+  document.addEventListener('keydown', handleKeydown)
 })
 
 onUnmounted(() => {
@@ -799,6 +1493,7 @@ onUnmounted(() => {
     cancelAnimationFrame(animationId)
   }
   window.removeEventListener('resize', onWindowResize)
+  document.removeEventListener('keydown', handleKeydown)
   if (renderer) {
     renderer.dispose()
   }
@@ -814,9 +1509,9 @@ onUnmounted(() => {
   background: var(--bg-primary);
 }
 
-/* Environment Sidebar */
-.env-sidebar {
-  width: 220px;
+/* Left Sidebar */
+.left-sidebar {
+  width: 240px;
   background: var(--bg-secondary);
   border-right: 1px solid var(--border);
   display: flex;
@@ -824,20 +1519,43 @@ onUnmounted(() => {
   transition: width 0.2s;
 }
 
-.env-sidebar.collapsed {
+.left-sidebar.collapsed {
   width: 40px;
 }
 
 .sidebar-header {
-  padding: 0.75rem;
+  padding: 0.5rem;
   background: var(--bg-tertiary);
   border-bottom: 1px solid var(--border);
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-weight: 600;
-  font-size: 0.85rem;
+  gap: 0.5rem;
+}
+
+.sidebar-tabs {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.sidebar-tabs button {
+  padding: 0.35rem 0.6rem;
+  font-size: 0.75rem;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.sidebar-tabs button:hover {
+  background: var(--bg-primary);
+}
+
+.sidebar-tabs button.active {
+  background: var(--bg-primary);
   color: var(--accent);
+  border-color: var(--border);
 }
 
 .toggle-btn {
@@ -849,6 +1567,7 @@ onUnmounted(() => {
   color: var(--text-secondary);
   cursor: pointer;
   font-size: 0.7rem;
+  margin-left: auto;
 }
 
 .toggle-btn:hover {
@@ -858,9 +1577,17 @@ onUnmounted(() => {
 .sidebar-content {
   flex: 1;
   overflow-y: auto;
-  padding: 0.75rem;
   display: flex;
   flex-direction: column;
+}
+
+.sidebar-content > :deep(.file-browser) {
+  height: 100%;
+}
+
+/* Environment panel inside sidebar */
+.left-sidebar .sidebar-content:not(:has(.file-browser)) {
+  padding: 0.75rem;
   gap: 0.75rem;
 }
 
@@ -926,6 +1653,64 @@ onUnmounted(() => {
 .env-python {
   font-size: 0.7rem;
   color: var(--accent);
+}
+
+.env-lang {
+  font-size: 0.7rem;
+  color: #f59e0b;
+}
+
+.env-item.vendor .env-lang {
+  color: #a855f7;
+}
+
+.env-sub-tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.env-sub-tabs button {
+  flex: 1;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.75rem;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.env-sub-tabs button:hover {
+  background: var(--bg-primary);
+}
+
+.env-sub-tabs button.active {
+  background: var(--accent);
+  color: var(--bg-primary);
+  border-color: var(--accent);
+}
+
+.env-section-header {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  margin-top: 0.75rem;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.env-panel {
+  padding: 0.75rem;
+  gap: 0.5rem;
+}
+
+.vendor-btn {
+  background: #a855f7 !important;
 }
 
 .env-meta {
@@ -1105,24 +1890,94 @@ onUnmounted(() => {
   align-items: center;
 }
 
-.notebook-title {
-  font-size: 1rem;
-  font-weight: 600;
-  background: transparent;
-  border: none;
-  color: var(--text-primary);
+.file-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
   flex: 1;
   margin-right: 1rem;
+  min-width: 0;
 }
 
-.notebook-title:focus {
-  outline: none;
+.file-name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-name.modified {
+  color: var(--accent);
+}
+
+.file-name.empty {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.file-path {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .header-right {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.save-btn {
+  background: var(--success) !important;
+  color: white !important;
+}
+
+.save-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.close-btn {
+  background: transparent !important;
+  color: var(--text-secondary) !important;
+  font-size: 1.1rem !important;
+  padding: 0.2rem 0.5rem !important;
+}
+
+.close-btn:hover {
+  color: var(--error) !important;
+}
+
+.no-file-message {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  text-align: center;
+  padding: 2rem;
+}
+
+.no-file-message p {
+  margin: 0.5rem 0;
+}
+
+.no-file-message .hint {
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
+.no-file-message code {
+  background: var(--bg-tertiary);
+  padding: 0.2rem 0.4rem;
+  border-radius: 3px;
+  font-family: monospace;
 }
 
 .env-badge {
@@ -1143,122 +1998,6 @@ onUnmounted(() => {
   flex: 1;
   overflow-y: auto;
   padding: 0.75rem;
-}
-
-.cell {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  margin-bottom: 0.5rem;
-  overflow: hidden;
-}
-
-.cell:focus-within {
-  border-color: var(--accent);
-}
-
-.cell-toolbar {
-  background: var(--bg-tertiary);
-  padding: 0.2rem 0.5rem;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  border-bottom: 1px solid var(--border);
-}
-
-.cell-number {
-  color: var(--text-secondary);
-  font-size: 0.7rem;
-  font-family: monospace;
-  min-width: 25px;
-}
-
-.run-btn, .delete-btn {
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.85rem;
-  border-radius: 4px;
-}
-
-.run-btn {
-  background: var(--success);
-  margin-left: auto;
-}
-
-.delete-btn {
-  background: transparent;
-  color: var(--text-secondary);
-}
-
-.delete-btn:hover {
-  background: var(--error);
-  color: white;
-}
-
-.spinner {
-  width: 10px;
-  height: 10px;
-  border: 2px solid transparent;
-  border-top-color: white;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-.cell-input textarea {
-  width: 100%;
-  min-height: 60px;
-  background: var(--bg-primary);
-  border: none;
-  color: var(--text-primary);
-  font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
-  font-size: 0.8rem;
-  padding: 0.5rem;
-  resize: vertical;
-  line-height: 1.4;
-}
-
-.cell-input textarea:focus {
-  outline: none;
-}
-
-.cell-output {
-  border-top: 1px solid var(--border);
-  padding: 0.5rem;
-  background: var(--bg-tertiary);
-  max-height: 200px;
-  overflow-y: auto;
-}
-
-.cell-output pre {
-  margin: 0;
-  color: var(--text-secondary);
-  font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
-  font-size: 0.75rem;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.cell-output pre.error {
-  color: var(--error);
-}
-
-.running-indicator {
-  color: var(--accent);
-  font-size: 0.8rem;
-  animation: pulse 1.5s ease-in-out infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
 }
 
 /* Create Environment Dialog */
@@ -1282,12 +2021,45 @@ onUnmounted(() => {
   padding: 1.5rem;
   width: 400px;
   max-width: 90%;
+  transition: width 0.2s ease;
 }
 
-.dialog h3 {
-  margin: 0 0 1.25rem 0;
+.dialog.expanded {
+  width: 66.67vw;
+  max-width: 66.67vw;
+}
+
+.dialog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.25rem;
+}
+
+.dialog-header h3 {
+  margin: 0;
   color: var(--accent);
   font-size: 1.1rem;
+}
+
+.expand-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.expand-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .form-group {
@@ -1371,5 +2143,56 @@ onUnmounted(() => {
   border-radius: 4px;
   font-size: 0.8rem;
   color: var(--accent);
+}
+
+.create-log {
+  margin-top: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.log-header {
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-primary);
+  font-size: 0.8rem;
+  color: var(--accent);
+  border-bottom: 1px solid var(--border);
+}
+
+.log-output {
+  max-height: 200px;
+  overflow-y: auto;
+  overflow-x: auto;
+  background: #0a0a12;
+  font-family: 'Monaco', 'Menlo', 'Consolas', 'Liberation Mono', 'Courier New', monospace;
+  font-size: 0.75rem;
+  padding: 0.5rem;
+  line-height: 1.4;
+}
+
+.dialog.expanded .log-output {
+  max-height: 300px;
+}
+
+.log-line {
+  padding: 0.1rem 0;
+  color: var(--text-secondary);
+  white-space: pre;
+  font-variant-ligatures: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.log-line.progress {
+  color: #888;
+}
+
+.log-line.success {
+  color: #4ade80;
+}
+
+.log-line.error {
+  color: #f87171;
 }
 </style>

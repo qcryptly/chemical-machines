@@ -57,8 +57,9 @@ notes/
 .vite/
 *.local
 
-# Package lock files (optional - uncomment if you prefer yarn.lock only)
-# package-lock.json
+# Package lock files
+package-lock.json
+**/package-lock.json
 
 # Test coverage
 coverage/

@@ -23,6 +23,7 @@
       <!-- File Browser Tab -->
       <div class="sidebar-content" v-if="sidebarOpen && sidebarTab === 'files'">
         <FileBrowser
+          :workspace-id="workspaceId"
           @file-open="handleFileOpen"
           @file-select="handleFileSelect"
         />
@@ -204,6 +205,23 @@
 
       <!-- Bottom Panel: Code Cells -->
       <div class="notebook-panel">
+        <!-- Tab Bar -->
+        <div class="tab-bar" v-if="openTabs.length > 0">
+          <div
+            v-for="(tab, index) in openTabs"
+            :key="tab.path"
+            class="tab"
+            :class="{ active: index === activeTabIndex, dirty: tab.isDirty }"
+            @click="switchToTab(index)"
+            :title="tab.path"
+          >
+            <span class="tab-icon">{{ getFileIcon(tab.name) }}</span>
+            <span class="tab-name">{{ tab.name }}</span>
+            <span v-if="tab.isDirty" class="tab-dirty-indicator">●</span>
+            <button class="tab-close" @click.stop="closeTab(index)" title="Close">×</button>
+          </div>
+        </div>
+
         <div class="panel-header">
           <div class="file-info" v-if="currentFile">
             <span class="file-name" :class="{ modified: hasUnsavedChanges }">
@@ -216,13 +234,62 @@
             <span class="file-path">Open a file from the sidebar</span>
           </div>
           <div class="header-right">
-            <span class="env-badge" :title="'Using ' + selectedEnvironment">
-              {{ selectedEnvironment }}
-            </span>
+            <!-- Python environment selector -->
+            <select
+              v-if="currentFile && currentFile.language === 'python'"
+              v-model="selectedEnvironment"
+              class="file-env-select"
+              title="Python environment"
+            >
+              <option v-for="env in environmentNames" :key="env" :value="env">{{ env }}</option>
+            </select>
+            <!-- C++ environment selectors -->
+            <select
+              v-if="currentFile && currentFile.language === 'cpp'"
+              v-model="selectedCppEnvironment"
+              class="file-env-select cpp"
+              title="C++ environment"
+            >
+              <option value="">System</option>
+              <option v-for="env in cppEnvironmentNames" :key="env" :value="env">{{ env }}</option>
+            </select>
+            <select
+              v-if="currentFile && currentFile.language === 'cpp'"
+              v-model="selectedVendorEnvironment"
+              class="file-env-select vendor"
+              title="Vendor libraries"
+            >
+              <option value="">No vendor</option>
+              <option v-for="env in vendorEnvironmentNames" :key="env" :value="env">{{ env }}</option>
+            </select>
+            <!-- C++ compiler selector -->
+            <select
+              v-if="currentFile && currentFile.language === 'cpp'"
+              v-model="selectedCompiler"
+              class="file-env-select compiler"
+              title="C++ compiler"
+            >
+              <option v-for="c in compilers" :key="c.name" :value="c.name" :disabled="!c.available">
+                {{ c.name }}{{ c.version ? ` (${c.version})` : '' }}
+              </option>
+            </select>
+            <!-- C++ standard selector -->
+            <select
+              v-if="currentFile && currentFile.language === 'cpp'"
+              v-model="selectedCppStandard"
+              class="file-env-select std"
+              title="C++ standard"
+            >
+              <option value="c++11">C++11</option>
+              <option value="c++14">C++14</option>
+              <option value="c++17">C++17</option>
+              <option value="c++20">C++20</option>
+              <option value="c++23">C++23</option>
+            </select>
             <button v-if="currentFile" @click="saveFile" class="save-btn" :disabled="!hasUnsavedChanges" title="Save file (Ctrl+S)">
               Save
             </button>
-            <button v-if="currentFile" @click="addCell" title="Add new cell">+ Cell</button>
+            <button v-if="currentFile && currentUseCells" @click="addCell" title="Add new cell">+ Cell</button>
             <button v-if="currentFile" @click="closeFile" class="close-btn" title="Close file">×</button>
           </div>
         </div>
@@ -233,23 +300,17 @@
             :key="cell.id"
             :cell="cell"
             :index="index"
-            :environments="environmentNames"
-            :selected-environment="selectedEnvironment"
-            :cpp-environments="cppEnvironmentNames"
-            :selected-cpp-environment="selectedCppEnvironment"
-            :vendor-environments="vendorEnvironmentNames"
-            :selected-vendor-environment="selectedVendorEnvironment"
+            :language="currentFile.language"
             @update="updateCell(index, $event)"
             @run="executeCell(index)"
             @delete="deleteCell(index)"
-            @environment-change="handleCellEnvironmentChange(index, $event)"
-            @cpp-environment-change="handleCellCppEnvironmentChange(index, $event)"
-            @vendor-environment-change="handleCellVendorEnvironmentChange(index, $event)"
           />
         </div>
         <div class="no-file-message" v-else-if="!currentFile">
           <p>Open a file from the Files sidebar to start editing</p>
-          <p class="hint">Use <code># %%</code> in Python/Bash or <code>// %%</code> in C++ to create cell boundaries</p>
+          <p class="hint">Use <code># %%</code> in <code>.cell.py</code> / <code>.sh</code> or <code>// %%</code> in <code>.cell.cpp</code> for cell boundaries</p>
+          <p class="hint">Regular <code>.py</code> and <code>.cpp/.c/.h/.hpp</code> files are single execution units</p>
+          <p class="hint">Import workspace modules with <code>from workspace import module</code></p>
         </div>
       </div>
     </div>
@@ -347,6 +408,15 @@ import VendorEnvironmentDialog from '../components/VendorEnvironmentDialog.vue'
 const route = useRoute()
 const viewport = ref(null)
 
+// Workspace ID from route
+const workspaceId = computed(() => route.params.id)
+
+// Helper to build workspace file API URL
+function fileApiUrl(filePath = '') {
+  const base = `/api/workspaces/${workspaceId.value}/files`
+  return filePath ? `${base}/${encodeURIComponent(filePath)}` : base
+}
+
 // Sidebar state
 const sidebarOpen = ref(true)
 const sidebarTab = ref('files')
@@ -362,6 +432,12 @@ const vendorEnvironments = ref([])
 const selectedCppEnvironment = ref('')
 const selectedVendorEnvironment = ref('')
 const envSubTab = ref('python')  // 'python' or 'cpp'
+const compilers = ref([
+  { name: 'g++', version: null, available: true },
+  { name: 'clang++', version: null, available: true }
+])
+const selectedCompiler = ref('clang++')
+const selectedCppStandard = ref('c++23')
 
 // Computed environment names for cell selector
 const environmentNames = computed(() => environments.value.map(e => e.name))
@@ -381,10 +457,54 @@ const isCreating = ref(false)
 const logOutput = ref(null)
 const dialogExpanded = ref(false)
 
-// File editor state
-const currentFile = ref(null)  // { path, name, language }
-const cells = ref([])
-const hasUnsavedChanges = ref(false)
+// File editor state - now with tabs
+const openTabs = ref([])  // Array of { path, name, language, cells, isDirty }
+const activeTabIndex = ref(-1)  // Currently active tab index
+
+// Computed properties for current file
+const currentFile = computed(() => {
+  if (activeTabIndex.value >= 0 && activeTabIndex.value < openTabs.value.length) {
+    const tab = openTabs.value[activeTabIndex.value]
+    return { path: tab.path, name: tab.name, language: tab.language }
+  }
+  return null
+})
+
+const cells = computed({
+  get: () => {
+    if (activeTabIndex.value >= 0 && activeTabIndex.value < openTabs.value.length) {
+      return openTabs.value[activeTabIndex.value].cells
+    }
+    return []
+  },
+  set: (value) => {
+    if (activeTabIndex.value >= 0 && activeTabIndex.value < openTabs.value.length) {
+      openTabs.value[activeTabIndex.value].cells = value
+    }
+  }
+})
+
+const hasUnsavedChanges = computed({
+  get: () => {
+    if (activeTabIndex.value >= 0 && activeTabIndex.value < openTabs.value.length) {
+      return openTabs.value[activeTabIndex.value].isDirty
+    }
+    return false
+  },
+  set: (value) => {
+    if (activeTabIndex.value >= 0 && activeTabIndex.value < openTabs.value.length) {
+      openTabs.value[activeTabIndex.value].isDirty = value
+    }
+  }
+})
+
+// Whether the current file uses cell mode
+const currentUseCells = computed(() => {
+  if (activeTabIndex.value >= 0 && activeTabIndex.value < openTabs.value.length) {
+    return openTabs.value[activeTabIndex.value].useCells !== false
+  }
+  return true
+})
 
 // Visualizer state
 const currentMolecule = ref(null)
@@ -424,6 +544,17 @@ async function loadPythonVersions() {
     pythonVersions.value = response.data.versions || ['3.12', '3.11', '3.10', '3.9', '3.8']
   } catch (error) {
     console.error('Error loading Python versions:', error)
+  }
+}
+
+async function loadCompilers() {
+  try {
+    const response = await axios.get('/api/compilers')
+    if (response.data.compilers && response.data.compilers.length > 0) {
+      compilers.value = response.data.compilers
+    }
+  } catch (error) {
+    console.error('Error loading compilers:', error)
   }
 }
 
@@ -746,6 +877,29 @@ function getLanguageFromExt(filename) {
 }
 
 /**
+ * Check if a file should use cell-based processing
+ * - .cell.cpp files use cells
+ * - .cell.py files use cells
+ * - .hpp files are single-file (header files)
+ * - Regular .cpp/.c/.h files are single-file
+ * - Regular .py files are single-file
+ * - Bash .sh files use cells
+ */
+function shouldUseCells(filename) {
+  const lower = filename.toLowerCase()
+  // .cell.cpp and .cell.py files use cell processing
+  if (lower.endsWith('.cell.cpp') || lower.endsWith('.cell.py')) return true
+  // .hpp and regular .cpp/.c/.h are single file
+  if (lower.endsWith('.hpp') || lower.endsWith('.cpp') || lower.endsWith('.c') || lower.endsWith('.h')) return false
+  // Regular .py files are single file (can be imported as modules)
+  if (lower.endsWith('.py')) return false
+  // Bash .sh files use cells
+  if (lower.endsWith('.sh')) return true
+  // Default to single file
+  return false
+}
+
+/**
  * Get the cell delimiter prefix for a language
  */
 function getCellDelimiterPrefix(language) {
@@ -824,8 +978,14 @@ function parseFileIntoCells(content, language) {
 
 /**
  * Combine cells back into file content with delimiters
+ * For single-file mode (useCells=false), just return the content without delimiters
  */
-function cellsToFileContent(cellsArray, language) {
+function cellsToFileContent(cellsArray, language, useCells = true) {
+  // Single-file mode: just return content without delimiters
+  if (!useCells && cellsArray.length === 1) {
+    return cellsArray[0].content
+  }
+
   const delimiterPrefix = getCellDelimiterPrefix(language)
 
   if (cellsArray.length === 1 && !cellsArray[0].title) {
@@ -847,8 +1007,10 @@ async function saveFile() {
   if (!currentFile.value) return
 
   try {
-    const content = cellsToFileContent(cells.value, currentFile.value.language)
-    await axios.put(`/api/files/${encodeURIComponent(currentFile.value.path)}`, {
+    const activeTab = openTabs.value[activeTabIndex.value]
+    const useCells = activeTab?.useCells !== false
+    const content = cellsToFileContent(cells.value, currentFile.value.language, useCells)
+    await axios.put(fileApiUrl(currentFile.value.path), {
       content
     })
     hasUnsavedChanges.value = false
@@ -859,15 +1021,61 @@ async function saveFile() {
 }
 
 /**
- * Close current file
+ * Close current file (closes active tab)
  */
 function closeFile() {
-  if (hasUnsavedChanges.value) {
-    if (!confirm('You have unsaved changes. Close anyway?')) return
+  if (activeTabIndex.value >= 0) {
+    closeTab(activeTabIndex.value)
   }
-  currentFile.value = null
-  cells.value = []
-  hasUnsavedChanges.value = false
+}
+
+/**
+ * Switch to a specific tab
+ */
+function switchToTab(index) {
+  if (index >= 0 && index < openTabs.value.length) {
+    activeTabIndex.value = index
+  }
+}
+
+/**
+ * Close a specific tab
+ */
+function closeTab(index) {
+  if (index < 0 || index >= openTabs.value.length) return
+
+  const tab = openTabs.value[index]
+  if (tab.isDirty) {
+    if (!confirm(`"${tab.name}" has unsaved changes. Close anyway?`)) return
+  }
+
+  openTabs.value.splice(index, 1)
+
+  // Adjust active tab index
+  if (openTabs.value.length === 0) {
+    activeTabIndex.value = -1
+  } else if (index <= activeTabIndex.value) {
+    activeTabIndex.value = Math.max(0, activeTabIndex.value - 1)
+  }
+}
+
+/**
+ * Get file icon based on extension
+ */
+function getFileIcon(filename) {
+  const ext = filename.split('.').pop()?.toLowerCase()
+  switch (ext) {
+    case 'py': return '🐍'
+    case 'cpp':
+    case 'c':
+    case 'h':
+    case 'hpp': return '⚙'
+    case 'sh':
+    case 'bash': return '💻'
+    case 'json': return '{}'
+    case 'md': return '📄'
+    default: return '📄'
+  }
 }
 
 function addCell() {
@@ -902,21 +1110,6 @@ function updateCell(index, { content, language, environment, cppEnvironment, ven
   if (cppStandard !== undefined) cell.cppStandard = cppStandard
 }
 
-function handleCellEnvironmentChange(index, environment) {
-  const cell = cells.value[index]
-  cell.environment = environment
-}
-
-function handleCellCppEnvironmentChange(index, cppEnvironment) {
-  const cell = cells.value[index]
-  cell.cppEnvironment = cppEnvironment
-}
-
-function handleCellVendorEnvironmentChange(index, vendorEnvironment) {
-  const cell = cells.value[index]
-  cell.vendorEnvironment = vendorEnvironment
-}
-
 function deleteCell(index) {
   cells.value.splice(index, 1)
   if (cells.value.length === 0 && currentFile.value) {
@@ -930,27 +1123,50 @@ async function executeCell(index) {
   cell.status = 'running'
   cell.output = ''
 
+  // Auto-save before execution
+  if (hasUnsavedChanges.value) {
+    try {
+      await saveFile()
+    } catch (err) {
+      cell.output = `Failed to save file before execution: ${err.message}`
+      cell.status = 'error'
+      return
+    }
+  }
+
   try {
     // Determine job type and params based on language
     const language = cell.language || 'python'
     let jobType, jobParams
 
+    // Build sourceDir: workspace ID + file's directory path
+    const fileDir = currentFile.value?.path
+      ? currentFile.value.path.includes('/')
+        ? currentFile.value.path.substring(0, currentFile.value.path.lastIndexOf('/'))
+        : ''
+      : ''
+    const sourceDir = workspaceId.value
+      ? (fileDir ? `${workspaceId.value}/${fileDir}` : String(workspaceId.value))
+      : fileDir
+
     if (language === 'cpp') {
-      // C++ execution
+      // C++ execution - use file-level settings
       jobType = 'execute_cpp'
       jobParams = {
         code: cell.content,
-        cppEnvironment: cell.cppEnvironment || selectedCppEnvironment.value || '',
-        vendorEnvironment: cell.vendorEnvironment || selectedVendorEnvironment.value || '',
-        compiler: cell.compiler || 'clang++',
-        cppStandard: cell.cppStandard || 'c++23'
+        sourceDir,  // Workspace ID + directory containing the source file
+        cppEnvironment: selectedCppEnvironment.value || '',
+        vendorEnvironment: selectedVendorEnvironment.value || '',
+        compiler: selectedCompiler.value,
+        cppStandard: selectedCppStandard.value
       }
     } else {
-      // Python/Bash execution
+      // Python/Bash execution - use file-level settings
       jobType = 'execute'
       jobParams = {
         code: cell.content,
-        environment: cell.environment || selectedEnvironment.value,
+        sourceDir,  // Workspace ID + directory containing the source file
+        environment: selectedEnvironment.value,
         language
       }
     }
@@ -1043,44 +1259,61 @@ async function executeCell(index) {
 }
 
 function handleJobResult(cell, result) {
-  cell.status = 'completed'
-
   try {
     const parsed = typeof result === 'string' ? JSON.parse(result) : result
 
     // Check if result contains error
-    if (parsed.error) {
+    if (parsed.error || parsed.status === 'error') {
       cell.status = 'error'
-      cell.output = parsed.stderr || parsed.error
+      // If there's already output from streaming, append error info
+      if (cell.output && cell.output.trim()) {
+        cell.output = cell.output + '\n\n--- Error ---\n' + (parsed.error || parsed.stderr || `Exit code: ${parsed.exitCode}`)
+      } else {
+        cell.output = parsed.stderr || parsed.error || `Exit code: ${parsed.exitCode}`
+      }
       return
     }
+
+    // Success - keep streamed output and add status line
+    cell.status = 'completed'
 
     // Check if result contains visualization data
     if (parsed.visualization) {
       renderMolecule(parsed.visualization)
-      cell.output = parsed.output || 'Visualization updated'
+      if (!cell.output) {
+        cell.output = 'Visualization updated'
+      }
     } else if (parsed.atoms || parsed.positions) {
       renderMolecule(parsed)
-      cell.output = 'Molecule rendered'
-    } else if (parsed.output !== undefined) {
+      if (!cell.output) {
+        cell.output = 'Molecule rendered'
+      }
+    } else if (parsed.output !== undefined && !cell.output) {
+      // Only set output if we don't already have streamed content
       cell.output = parsed.output + (parsed.stderr ? '\n' + parsed.stderr : '')
-    } else {
-      cell.output = JSON.stringify(parsed, null, 2)
+    }
+
+    // For jobs that stream output (like C++ execution), just add a simple status
+    // Don't replace the existing output with the result object
+    if (cell.output && cell.output.trim()) {
+      // Add a completion status line
+      const statusLine = parsed.exitCode !== undefined
+        ? `\n✓ Completed (exit code: ${parsed.exitCode})`
+        : '\n✓ Completed'
+      cell.output = cell.output + statusLine
     }
   } catch {
-    cell.output = String(result)
+    cell.status = 'completed'
+    if (!cell.output) {
+      cell.output = String(result)
+    }
   }
 }
 
 // ================== File Browser Functions ==================
 
 async function handleFileOpen(file) {
-  // Check for unsaved changes
-  if (hasUnsavedChanges.value) {
-    if (!confirm('You have unsaved changes. Open new file anyway?')) return
-  }
-
-  // Open file in the editor
+  // With tabs, we can open files without losing unsaved changes
   await openFile(file)
 }
 
@@ -1091,20 +1324,50 @@ function handleFileSelect(file) {
 
 async function openFile(file) {
   try {
-    const response = await axios.get(`/api/files/${encodeURIComponent(file.path)}`)
+    // Check if file is already open in a tab
+    const existingIndex = openTabs.value.findIndex(tab => tab.path === file.path)
+    if (existingIndex >= 0) {
+      // Switch to existing tab
+      activeTabIndex.value = existingIndex
+      return
+    }
+
+    const response = await axios.get(fileApiUrl(file.path))
     if (response.data.type === 'file') {
       const language = getLanguageFromExt(file.name)
+      const content = response.data.content || ''
+      const useCells = shouldUseCells(file.name)
 
-      // Set current file
-      currentFile.value = {
-        path: file.path,
-        name: file.name,
-        language
+      let fileCells
+      if (useCells) {
+        // Parse file content into cells (for .cell.cpp, .py, .sh files)
+        fileCells = parseFileIntoCells(content, language)
+      } else {
+        // Single-file mode for regular .cpp, .c, .h, .hpp files
+        fileCells = [{
+          id: Date.now(),
+          type: 'code',
+          language,
+          environment: selectedEnvironment.value,
+          content: content,
+          title: '',
+          output: null,
+          status: null
+        }]
       }
 
-      // Parse file content into cells
-      cells.value = parseFileIntoCells(response.data.content || '', language)
-      hasUnsavedChanges.value = false
+      // Add new tab
+      openTabs.value.push({
+        path: file.path,
+        name: file.name,
+        language,
+        cells: fileCells,
+        isDirty: false,
+        useCells  // Track whether this file uses cell mode
+      })
+
+      // Switch to the new tab
+      activeTabIndex.value = openTabs.value.length - 1
     }
   } catch (error) {
     console.error('Error opening file:', error)
@@ -1479,7 +1742,8 @@ onMounted(async () => {
     loadEnvironments(),
     loadPythonVersions(),
     loadCppEnvironments(),
-    loadVendorEnvironments()
+    loadVendorEnvironments(),
+    loadCompilers()
   ])
   await nextTick()
   initThree()
@@ -1881,6 +2145,99 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
+.tab-bar {
+  display: flex;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+
+.tab-bar::-webkit-scrollbar {
+  height: 4px;
+}
+
+.tab-bar::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-tertiary);
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+  position: relative;
+}
+
+.tab:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.tab.active {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border-bottom: 2px solid var(--accent);
+  margin-bottom: -1px;
+}
+
+.tab.dirty .tab-name {
+  font-style: italic;
+}
+
+.tab-icon {
+  font-size: 0.9rem;
+}
+
+.tab-name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tab-dirty-indicator {
+  color: var(--accent);
+  font-size: 0.6rem;
+  margin-left: -0.2rem;
+}
+
+.tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  margin-left: 0.25rem;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.tab:hover .tab-close,
+.tab.active .tab-close {
+  opacity: 1;
+}
+
+.tab-close:hover {
+  background: var(--error);
+  color: white;
+}
+
 .panel-header {
   background: var(--bg-secondary);
   padding: 0.5rem 1rem;
@@ -1930,6 +2287,37 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.5rem;
   flex-shrink: 0;
+}
+
+.file-env-select {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--accent);
+  cursor: pointer;
+  max-width: 120px;
+}
+
+.file-env-select:hover {
+  border-color: var(--accent);
+}
+
+.file-env-select.cpp {
+  color: #f59e0b;
+}
+
+.file-env-select.vendor {
+  color: #a855f7;
+}
+
+.file-env-select.compiler {
+  color: #10b981;
+}
+
+.file-env-select.std {
+  color: #6366f1;
 }
 
 .save-btn {

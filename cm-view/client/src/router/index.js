@@ -1,22 +1,22 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import NotebookList from '../views/NotebookList.vue'
+import WorkspaceList from '../views/WorkspaceList.vue'
 import WorkspaceView from '../views/WorkspaceView.vue'
 
 const routes = [
   {
     path: '/',
-    name: 'NotebookList',
-    component: NotebookList
+    name: 'WorkspaceList',
+    component: WorkspaceList
   },
   {
-    path: '/notebook/:id',
+    path: '/workspace/:id',
     name: 'Workspace',
     component: WorkspaceView
   },
+  // Legacy route redirect
   {
-    path: '/workspace',
-    name: 'NewWorkspace',
-    component: WorkspaceView
+    path: '/notebook/:id',
+    redirect: to => ({ path: `/workspace/${to.params.id}` })
   }
 ]
 

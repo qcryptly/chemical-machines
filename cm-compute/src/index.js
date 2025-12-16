@@ -332,6 +332,41 @@ let CppEnvironment = null;
 let VendorEnvironment = null;
 
 // Search for available debian dev packages
+// Get C++ compiler versions
+app.get('/compilers', (req, res) => {
+  const compilers = [];
+
+  // Check g++
+  try {
+    const gppVersion = execSync('g++ --version 2>&1 | head -1', { encoding: 'utf-8' }).trim();
+    const versionMatch = gppVersion.match(/(\d+\.\d+\.\d+)/);
+    compilers.push({
+      name: 'g++',
+      version: versionMatch ? versionMatch[1] : 'unknown',
+      fullVersion: gppVersion,
+      available: true
+    });
+  } catch (e) {
+    compilers.push({ name: 'g++', version: null, available: false });
+  }
+
+  // Check clang++
+  try {
+    const clangVersion = execSync('clang++ --version 2>&1 | head -1', { encoding: 'utf-8' }).trim();
+    const versionMatch = clangVersion.match(/(\d+\.\d+\.\d+)/);
+    compilers.push({
+      name: 'clang++',
+      version: versionMatch ? versionMatch[1] : 'unknown',
+      fullVersion: clangVersion,
+      available: true
+    });
+  } catch (e) {
+    compilers.push({ name: 'clang++', version: null, available: false });
+  }
+
+  res.json({ compilers });
+});
+
 app.get('/debian-packages/search', async (req, res) => {
   const { q, limit = 50 } = req.query;
 

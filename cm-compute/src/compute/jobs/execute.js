@@ -2,29 +2,70 @@
  * Execute Job Handler
  *
  * Executes arbitrary Python code (for notebook cells)
+ * Supports workspace-relative imports via `from workspace import module`
  */
 
 const { spawn } = require('child_process');
+const path = require('path');
+const fs = require('fs');
+
+// Workspace directory (matches cm-view configuration)
+const WORKSPACE_DIR = process.env.WORKSPACE_DIR || path.join(__dirname, '../../../../workspace');
+
+/**
+ * Ensure workspace has an __init__.py for package imports
+ */
+function ensureWorkspacePackage() {
+  const initPath = path.join(WORKSPACE_DIR, '__init__.py');
+  if (!fs.existsSync(initPath)) {
+    try {
+      fs.writeFileSync(initPath, '# Workspace package - auto-generated\n');
+    } catch (e) {
+      // Ignore - workspace might not exist yet
+    }
+  }
+}
 
 /**
  * Execute Python code directly
- * @param {Object} params - Job parameters { code, environment }
+ * @param {Object} params - Job parameters { code, environment, sourceDir }
  * @param {Object} context - Execution context { pythonPath, jobId, emit }
  * @returns {Promise<Object>} Execution results
  */
 async function execute(params, context) {
   const { pythonPath, jobId, emit } = context;
-  const { code } = params;
+  const { code, sourceDir = '' } = params;
 
   if (!code) {
     throw new Error('No code provided');
   }
 
+  // Ensure workspace can be imported as a package
+  ensureWorkspacePackage();
+
+  // Build PYTHONPATH to include:
+  // 1. Parent of workspace (so `import workspace` works)
+  // 2. The workspace itself (so `import module` works for files in workspace root)
+  // 3. The source file's directory (so relative imports work)
+  const workspaceParent = path.dirname(WORKSPACE_DIR);
+  const sourceFullDir = sourceDir ? path.join(WORKSPACE_DIR, sourceDir) : WORKSPACE_DIR;
+
+  const pythonPathParts = [
+    workspaceParent,  // For `from workspace import module`
+    WORKSPACE_DIR,    // For direct `import module` from workspace root
+    sourceFullDir     // For relative imports from current file's directory
+  ];
+
+  const existingPythonPath = process.env.PYTHONPATH || '';
+  const newPythonPath = [...pythonPathParts, existingPythonPath].filter(Boolean).join(':');
+
   return new Promise((resolve, reject) => {
     const python = spawn(pythonPath, ['-c', code], {
+      cwd: sourceFullDir,  // Run from the source file's directory
       env: {
         ...process.env,
-        PYTHONUNBUFFERED: '1'
+        PYTHONUNBUFFERED: '1',
+        PYTHONPATH: newPythonPath
       }
     });
 
@@ -53,8 +94,8 @@ async function execute(params, context) {
       emit('stderr', output);
     });
 
-    python.on('close', (code) => {
-      if (code === 0) {
+    python.on('close', (exitCode) => {
+      if (exitCode === 0) {
         // Try to parse as JSON first
         try {
           const result = JSON.parse(stdout.trim());
@@ -65,7 +106,7 @@ async function execute(params, context) {
         }
       } else {
         resolve({
-          error: `Python exited with code ${code}`,
+          error: `Python exited with code ${exitCode}`,
           output: stdout,
           stderr: stderr
         });

@@ -2,10 +2,20 @@
   <div class="tree-node">
     <div
       class="node-row"
-      :class="{ selected: selectedPath === item.path, folder: item.type === 'folder' }"
+      :class="{
+        selected: selectedPath === item.path,
+        folder: item.type === 'folder',
+        'drag-over': isDragOver && item.type === 'folder'
+      }"
+      draggable="true"
       @click="handleClick"
       @dblclick="handleDoubleClick"
       @contextmenu.prevent="showContextMenu"
+      @dragstart="handleDragStart"
+      @dragend="handleDragEnd"
+      @dragover="handleDragOver"
+      @dragleave="handleDragLeave"
+      @drop="handleDrop"
     >
       <span
         v-if="item.type === 'folder'"
@@ -33,6 +43,7 @@
         @create-file="$emit('create-file', $event)"
         @create-folder="$emit('create-folder', $event)"
         @context-menu="$emit('context-menu', $event)"
+        @move="$emit('move', $event)"
       />
     </div>
   </div>
@@ -46,9 +57,10 @@ const props = defineProps({
   selectedPath: { type: String, default: null }
 })
 
-const emit = defineEmits(['select', 'open', 'delete', 'rename', 'create-file', 'create-folder', 'context-menu'])
+const emit = defineEmits(['select', 'open', 'delete', 'rename', 'create-file', 'create-folder', 'context-menu', 'move'])
 
 const expanded = ref(false)
+const isDragOver = ref(false)
 
 function getIcon(item) {
   if (item.type === 'folder') {
@@ -98,6 +110,58 @@ function showContextMenu(event) {
   emit('select', props.item)
   emit('context-menu', { item: props.item, x: event.clientX, y: event.clientY })
 }
+
+// Drag and drop handlers
+function handleDragStart(event) {
+  event.dataTransfer.setData('application/json', JSON.stringify({
+    path: props.item.path,
+    name: props.item.name,
+    type: props.item.type
+  }))
+  event.dataTransfer.effectAllowed = 'move'
+}
+
+function handleDragEnd() {
+  isDragOver.value = false
+}
+
+function handleDragOver(event) {
+  // Only allow dropping on folders
+  if (props.item.type !== 'folder') return
+
+  event.preventDefault()
+  event.dataTransfer.dropEffect = 'move'
+  isDragOver.value = true
+}
+
+function handleDragLeave() {
+  isDragOver.value = false
+}
+
+function handleDrop(event) {
+  event.preventDefault()
+  isDragOver.value = false
+
+  // Only allow dropping on folders
+  if (props.item.type !== 'folder') return
+
+  try {
+    const data = JSON.parse(event.dataTransfer.getData('application/json'))
+
+    // Don't allow dropping on itself or into its own children
+    if (data.path === props.item.path) return
+    if (props.item.path.startsWith(data.path + '/')) return
+
+    // Emit move event with source and target
+    emit('move', {
+      sourcePath: data.path,
+      sourceName: data.name,
+      targetFolder: props.item.path
+    })
+  } catch (err) {
+    console.error('Error parsing drag data:', err)
+  }
+}
 </script>
 
 <style scoped>
@@ -121,6 +185,12 @@ function showContextMenu(event) {
 
 .node-row.selected {
   background: rgba(0, 212, 255, 0.15);
+}
+
+.node-row.drag-over {
+  background: rgba(0, 212, 255, 0.3);
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
 }
 
 .expand-icon {

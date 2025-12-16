@@ -1,15 +1,8 @@
 // %%
 #include <iostream>
-
+#include "./another-file.hpp"
 int main() {
-  std::cout << "Hello!" << std::endl;
-  return 0;
-}
-
-// %% Cell 2
-#include <iostream>
-
-int main() {
-  std::cout << "Hello!" << std::endl;
+  hello v{.x = 10};
+  std::cout << "Hello! " << v.x << std::endl;
   return 0;
 }

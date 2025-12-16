@@ -101,8 +101,8 @@ COPY cm-compute /app/cm-compute
 COPY cm-view /app/cm-view
 
 # Install Node.js dependencies
-RUN cd /app/cm-compute && npm install --production \
-    && cd /app/cm-view && npm install --production \
+RUN cd /app/cm-compute && npm install --development \
+    && cd /app/cm-view && npm install --development \
     && cd /app/cm-view/client && npm install && npm run build
 
 # Copy supervisor configuration
@@ -120,6 +120,8 @@ RUN service postgresql start \
 RUN sed -i 's|/usr/bin/node /app/cm-compute|/opt/conda/envs/chemcomp/bin/python /app/cm-compute|g' /etc/supervisor/conf.d/supervisord.conf
 
 RUN npm i -g concurrently nodemon
+
+RUN apt update -y && apt install -y clang
 
 # Expose ports
 EXPOSE 3000 5432 9200

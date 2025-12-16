@@ -2,68 +2,6 @@
   <div class="cell" :class="{ focused: isFocused }">
     <div class="cell-toolbar">
       <span class="cell-number">[{{ index + 1 }}]</span>
-      <select v-model="cellLanguage" @change="onLanguageChange" class="lang-select">
-        <option value="python">Python</option>
-        <option value="cpp">C++</option>
-        <option value="bash">Bash</option>
-      </select>
-      <!-- Python environment selector -->
-      <select
-        v-if="cellLanguage === 'python'"
-        v-model="cellEnvironment"
-        @change="onEnvironmentChange"
-        class="env-select"
-        title="Conda environment"
-      >
-        <option v-for="env in environments" :key="env" :value="env">{{ env }}</option>
-      </select>
-      <!-- C++ environment selector -->
-      <select
-        v-if="cellLanguage === 'cpp'"
-        v-model="cellCppEnvironment"
-        @change="onCppEnvironmentChange"
-        class="env-select cpp-env"
-        title="C++ environment"
-      >
-        <option value="">System</option>
-        <option v-for="env in cppEnvironments" :key="env" :value="env">{{ env }}</option>
-      </select>
-      <!-- Vendor environment selector for C++ -->
-      <select
-        v-if="cellLanguage === 'cpp'"
-        v-model="cellVendorEnvironment"
-        @change="onVendorEnvironmentChange"
-        class="env-select vendor-env"
-        title="Vendor libraries"
-      >
-        <option value="">No vendor</option>
-        <option v-for="env in vendorEnvironments" :key="env" :value="env">{{ env }}</option>
-      </select>
-      <!-- C++ compiler selector -->
-      <select
-        v-if="cellLanguage === 'cpp'"
-        v-model="cellCompiler"
-        @change="onCompilerChange"
-        class="compiler-select"
-        title="C++ compiler"
-      >
-        <option value="g++">g++</option>
-        <option value="clang++">clang++</option>
-      </select>
-      <!-- C++ standard selector -->
-      <select
-        v-if="cellLanguage === 'cpp'"
-        v-model="cellCppStandard"
-        @change="onCppStandardChange"
-        class="std-select"
-        title="C++ standard"
-      >
-        <option value="c++11">C++11</option>
-        <option value="c++14">C++14</option>
-        <option value="c++17">C++17</option>
-        <option value="c++20">C++20</option>
-        <option value="c++23">C++23</option>
-      </select>
       <div class="toolbar-spacer"></div>
       <button @click="$emit('run')" class="run-btn" title="Run cell (Ctrl+Enter)">
         <span v-if="cell.status === 'running'" class="spinner"></span>
@@ -87,7 +25,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from '@codemirror/view'
 import { EditorState } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
@@ -364,24 +302,13 @@ const customHighlightStyle = HighlightStyle.define([
 const props = defineProps({
   cell: { type: Object, required: true },
   index: { type: Number, required: true },
-  environments: { type: Array, default: () => ['chemcomp'] },
-  selectedEnvironment: { type: String, default: 'chemcomp' },
-  cppEnvironments: { type: Array, default: () => [] },
-  selectedCppEnvironment: { type: String, default: '' },
-  vendorEnvironments: { type: Array, default: () => [] },
-  selectedVendorEnvironment: { type: String, default: '' }
+  language: { type: String, default: 'python' }
 })
 
-const emit = defineEmits(['update', 'run', 'delete', 'blur', 'environment-change', 'cpp-environment-change', 'vendor-environment-change', 'compiler-change', 'cpp-standard-change'])
+const emit = defineEmits(['update', 'run', 'delete', 'blur'])
 
 const editorContainer = ref(null)
 const isFocused = ref(false)
-const cellLanguage = ref(props.cell.language || 'python')
-const cellCompiler = ref(props.cell.compiler || 'clang++')
-const cellCppStandard = ref(props.cell.cppStandard || 'c++23')
-const cellEnvironment = ref(props.cell.environment || props.selectedEnvironment)
-const cellCppEnvironment = ref(props.cell.cppEnvironment || props.selectedCppEnvironment)
-const cellVendorEnvironment = ref(props.cell.vendorEnvironment || props.selectedVendorEnvironment)
 let editorView = null
 
 const languageExtensions = {
@@ -399,7 +326,7 @@ function createEditor() {
   if (!editorContainer.value) return
 
   // Create language-specific autocomplete
-  const languageCompletions = completeFromList(getCompletions(cellLanguage.value))
+  const languageCompletions = completeFromList(getCompletions(props.language))
 
   const extensions = [
     lineNumbers(),
@@ -409,7 +336,7 @@ function createEditor() {
     bracketMatching(),
     foldGutter(),
     syntaxHighlighting(customHighlightStyle),
-    getLanguageExtension(cellLanguage.value),
+    getLanguageExtension(props.language),
     autocompletion({
       override: [languageCompletions],
       activateOnTyping: true,
@@ -431,7 +358,7 @@ function createEditor() {
     EditorView.updateListener.of((update) => {
       if (update.docChanged) {
         const content = update.state.doc.toString()
-        emit('update', { content, language: cellLanguage.value })
+        emit('update', { content })
       }
       if (update.focusChanged) {
         isFocused.value = update.view.hasFocus
@@ -532,47 +459,6 @@ function destroyEditor() {
   }
 }
 
-function onLanguageChange() {
-  // Rebuild editor with new language
-  const content = editorView?.state.doc.toString() || props.cell.content || ''
-  destroyEditor()
-  emit('update', { content, language: cellLanguage.value, environment: cellEnvironment.value })
-  nextTick(() => {
-    createEditor()
-    // Restore content after recreating editor
-    if (editorView && content !== editorView.state.doc.toString()) {
-      editorView.dispatch({
-        changes: { from: 0, to: editorView.state.doc.length, insert: content }
-      })
-    }
-  })
-}
-
-function onEnvironmentChange() {
-  emit('update', { environment: cellEnvironment.value })
-  emit('environment-change', cellEnvironment.value)
-}
-
-function onCppEnvironmentChange() {
-  emit('update', { cppEnvironment: cellCppEnvironment.value })
-  emit('cpp-environment-change', cellCppEnvironment.value)
-}
-
-function onVendorEnvironmentChange() {
-  emit('update', { vendorEnvironment: cellVendorEnvironment.value })
-  emit('vendor-environment-change', cellVendorEnvironment.value)
-}
-
-function onCompilerChange() {
-  emit('update', { compiler: cellCompiler.value })
-  emit('compiler-change', cellCompiler.value)
-}
-
-function onCppStandardChange() {
-  emit('update', { cppStandard: cellCppStandard.value })
-  emit('cpp-standard-change', cellCppStandard.value)
-}
-
 // Watch for external content changes
 watch(() => props.cell.content, (newContent) => {
   if (editorView && newContent !== editorView.state.doc.toString()) {
@@ -582,59 +468,15 @@ watch(() => props.cell.content, (newContent) => {
   }
 })
 
-watch(() => props.cell.language, (newLang) => {
-  if (newLang && newLang !== cellLanguage.value) {
-    cellLanguage.value = newLang
-    onLanguageChange()
-  }
-})
-
-watch(() => props.cell.environment, (newEnv) => {
-  if (newEnv && newEnv !== cellEnvironment.value) {
-    cellEnvironment.value = newEnv
-  }
-})
-
-watch(() => props.selectedEnvironment, (newEnv) => {
-  // Update cell environment when global selection changes (if cell doesn't have its own)
-  if (!props.cell.environment && newEnv !== cellEnvironment.value) {
-    cellEnvironment.value = newEnv
-  }
-})
-
-watch(() => props.cell.cppEnvironment, (newEnv) => {
-  if (newEnv !== undefined && newEnv !== cellCppEnvironment.value) {
-    cellCppEnvironment.value = newEnv
-  }
-})
-
-watch(() => props.cell.vendorEnvironment, (newEnv) => {
-  if (newEnv !== undefined && newEnv !== cellVendorEnvironment.value) {
-    cellVendorEnvironment.value = newEnv
-  }
-})
-
-watch(() => props.selectedCppEnvironment, (newEnv) => {
-  if (!props.cell.cppEnvironment && newEnv !== cellCppEnvironment.value) {
-    cellCppEnvironment.value = newEnv
-  }
-})
-
-watch(() => props.selectedVendorEnvironment, (newEnv) => {
-  if (!props.cell.vendorEnvironment && newEnv !== cellVendorEnvironment.value) {
-    cellVendorEnvironment.value = newEnv
-  }
-})
-
-watch(() => props.cell.compiler, (newCompiler) => {
-  if (newCompiler !== undefined && newCompiler !== cellCompiler.value) {
-    cellCompiler.value = newCompiler
-  }
-})
-
-watch(() => props.cell.cppStandard, (newStd) => {
-  if (newStd !== undefined && newStd !== cellCppStandard.value) {
-    cellCppStandard.value = newStd
+// Rebuild editor when language changes
+watch(() => props.language, () => {
+  const content = editorView?.state.doc.toString() || props.cell.content || ''
+  destroyEditor()
+  createEditor()
+  if (editorView && content) {
+    editorView.dispatch({
+      changes: { from: 0, to: editorView.state.doc.length, insert: content }
+    })
   }
 })
 

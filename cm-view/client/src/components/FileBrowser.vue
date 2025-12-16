@@ -9,7 +9,14 @@
       </div>
     </div>
 
-    <div class="file-tree" @contextmenu.prevent="handleTreeContextMenu">
+    <div
+      class="file-tree"
+      :class="{ 'drag-over-root': isDragOverRoot }"
+      @contextmenu.prevent="handleTreeContextMenu"
+      @dragover="handleRootDragOver"
+      @dragleave="handleRootDragLeave"
+      @drop="handleRootDrop"
+    >
       <div v-if="loading" class="loading">Loading...</div>
       <div v-else-if="error" class="error">{{ error }}</div>
       <template v-else>
@@ -25,6 +32,7 @@
           @create-file="createFileIn"
           @create-folder="createFolderIn"
           @context-menu="handleContextMenu"
+          @move="moveItem"
         />
       </template>
     </div>
@@ -72,9 +80,13 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import axios from 'axios'
 import FileTreeNode from './FileTreeNode.vue'
+
+const props = defineProps({
+  workspaceId: { type: [String, Number], required: true }
+})
 
 const emit = defineEmits(['file-open', 'file-select'])
 
@@ -83,6 +95,7 @@ const loading = ref(true)
 const error = ref(null)
 const selectedPath = ref(null)
 const inputRef = ref(null)
+const isDragOverRoot = ref(false)
 
 const contextMenu = ref({
   show: false,
@@ -101,11 +114,17 @@ const inputDialog = ref({
   parentPath: ''
 })
 
+// Helper to build workspace file API URL
+function fileApiUrl(filePath = '') {
+  const base = `/api/workspaces/${props.workspaceId}/files`
+  return filePath ? `${base}/${encodeURIComponent(filePath)}` : base
+}
+
 async function refresh() {
   loading.value = true
   error.value = null
   try {
-    const response = await axios.get('/api/files')
+    const response = await axios.get(fileApiUrl())
     files.value = response.data.files || []
   } catch (err) {
     error.value = err.response?.data?.error || err.message
@@ -114,6 +133,11 @@ async function refresh() {
     loading.value = false
   }
 }
+
+// Watch for workspace changes and refresh
+watch(() => props.workspaceId, () => {
+  refresh()
+})
 
 function selectItem(item) {
   selectedPath.value = item.path
@@ -179,7 +203,7 @@ async function deleteItem(item) {
   }
 
   try {
-    await axios.delete(`/api/files/${encodeURIComponent(item.path)}`)
+    await axios.delete(fileApiUrl(item.path))
     await refresh()
   } catch (err) {
     alert(`Error deleting: ${err.response?.data?.error || err.message}`)
@@ -196,15 +220,15 @@ async function confirmInput() {
 
   try {
     if (action === 'createFile') {
-      const path = parentPath ? `${parentPath}/${value}` : value
-      await axios.post('/api/files', { path, type: 'file', content: '' })
+      const filePath = parentPath ? `${parentPath}/${value}` : value
+      await axios.post(fileApiUrl(), { path: filePath, type: 'file', content: '' })
     } else if (action === 'createFolder') {
-      const path = parentPath ? `${parentPath}/${value}` : value
-      await axios.post('/api/files', { path, type: 'folder' })
+      const filePath = parentPath ? `${parentPath}/${value}` : value
+      await axios.post(fileApiUrl(), { path: filePath, type: 'folder' })
     } else if (action === 'rename') {
       const parentDir = item.path.includes('/') ? item.path.substring(0, item.path.lastIndexOf('/')) : ''
       const newPath = parentDir ? `${parentDir}/${value}` : value
-      await axios.put(`/api/files/${encodeURIComponent(item.path)}`, { newPath })
+      await axios.put(fileApiUrl(item.path), { newPath })
     }
 
     await refresh()
@@ -265,6 +289,64 @@ function handleTreeContextMenu(event) {
 
 function hideContextMenu() {
   contextMenu.value.show = false
+}
+
+// Move file/folder to a new location
+async function moveItem({ sourcePath, sourceName, targetFolder }) {
+  const newPath = targetFolder ? `${targetFolder}/${sourceName}` : sourceName
+
+  // Don't move if already in the same location
+  if (sourcePath === newPath) return
+
+  try {
+    await axios.put(fileApiUrl(sourcePath), { newPath })
+    await refresh()
+  } catch (err) {
+    alert(`Error moving: ${err.response?.data?.error || err.message}`)
+  }
+}
+
+// Root level drag handlers (for moving to root)
+function handleRootDragOver(event) {
+  // Only handle if not over a tree node
+  if (event.target.closest('.node-row')) {
+    isDragOverRoot.value = false
+    return
+  }
+  event.preventDefault()
+  event.dataTransfer.dropEffect = 'move'
+  isDragOverRoot.value = true
+}
+
+function handleRootDragLeave(event) {
+  // Only clear if leaving the file-tree entirely
+  if (!event.currentTarget.contains(event.relatedTarget)) {
+    isDragOverRoot.value = false
+  }
+}
+
+function handleRootDrop(event) {
+  // Only handle if not over a tree node (folders handle their own drops)
+  if (event.target.closest('.node-row')) {
+    isDragOverRoot.value = false
+    return
+  }
+
+  event.preventDefault()
+  isDragOverRoot.value = false
+
+  try {
+    const data = JSON.parse(event.dataTransfer.getData('application/json'))
+
+    // Move to root (empty target folder)
+    moveItem({
+      sourcePath: data.path,
+      sourceName: data.name,
+      targetFolder: ''
+    })
+  } catch (err) {
+    console.error('Error parsing drag data:', err)
+  }
 }
 
 onMounted(() => {
@@ -329,6 +411,12 @@ onUnmounted(() => {
   flex: 1;
   overflow-y: auto;
   padding: 0.5rem;
+}
+
+.file-tree.drag-over-root {
+  background: rgba(0, 212, 255, 0.1);
+  outline: 2px dashed var(--accent);
+  outline-offset: -4px;
 }
 
 .loading, .error {

@@ -9,11 +9,95 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { analyzeCode, generateCompileCommand } = require('../lib/include-parser');
+const { analyzeCode, generateCompileCommand, parseIncludes } = require('../lib/include-parser');
 const database = require('../../database');
+
+// Workspace directory (matches cm-view configuration)
+const WORKSPACE_DIR = process.env.WORKSPACE_DIR || path.join(__dirname, '../../../../workspace');
 
 // Track if database is initialized in this worker
 let dbInitialized = false;
+
+/**
+ * Extract local include paths from code (includes with ./ or ../ or just filename)
+ * @param {string} code - C++ source code
+ * @returns {string[]} Array of local include paths
+ */
+function extractLocalIncludes(code) {
+  const includes = parseIncludes(code);
+  return includes.filter(inc => {
+    // Local includes: start with ./ or ../, or end with .h/.hpp/.hxx and don't contain /
+    return inc.startsWith('./') ||
+           inc.startsWith('../') ||
+           (inc.match(/\.(h|hpp|hxx)$/i) && !inc.includes('/'));
+  });
+}
+
+/**
+ * Copy local include files to target directory, preserving relative paths
+ * @param {string} sourceDir - Source directory (relative to workspace)
+ * @param {string} targetDir - Target directory to copy files to
+ * @param {string[]} localIncludes - Array of local include paths
+ * @param {Function} emit - Emit function for logging
+ * @returns {string[]} Array of successfully copied files
+ */
+function copyLocalIncludes(sourceDir, targetDir, localIncludes, emit) {
+  const copiedFiles = [];
+  const workspaceSourceDir = path.join(WORKSPACE_DIR, sourceDir);
+
+  for (const include of localIncludes) {
+    try {
+      // Resolve the include path relative to the source directory
+      const sourcePath = path.resolve(workspaceSourceDir, include);
+
+      // Security check: ensure the resolved path is within workspace
+      const resolvedWorkspace = path.resolve(WORKSPACE_DIR);
+      if (!sourcePath.startsWith(resolvedWorkspace)) {
+        emit('stderr', `Warning: Include path '${include}' is outside workspace, skipping\n`);
+        continue;
+      }
+
+      // Check if file exists
+      if (!fs.existsSync(sourcePath)) {
+        emit('stderr', `Warning: Include file '${include}' not found at ${sourcePath}\n`);
+        continue;
+      }
+
+      // Determine target path (preserve relative structure)
+      const targetPath = path.join(targetDir, include);
+
+      // Create parent directories if needed
+      const targetParent = path.dirname(targetPath);
+      if (!fs.existsSync(targetParent)) {
+        fs.mkdirSync(targetParent, { recursive: true });
+      }
+
+      // Copy the file
+      fs.copyFileSync(sourcePath, targetPath);
+      copiedFiles.push(include);
+
+      // Recursively check the included file for more includes
+      const fileContent = fs.readFileSync(sourcePath, 'utf-8');
+      const nestedIncludes = extractLocalIncludes(fileContent);
+      if (nestedIncludes.length > 0) {
+        // Resolve nested includes relative to the included file's directory
+        const includeDir = path.dirname(include);
+        const nestedResolved = nestedIncludes.map(nested => {
+          if (includeDir && includeDir !== '.') {
+            return path.join(includeDir, nested);
+          }
+          return nested;
+        });
+        const nestedCopied = copyLocalIncludes(sourceDir, targetDir, nestedResolved, emit);
+        copiedFiles.push(...nestedCopied);
+      }
+    } catch (e) {
+      emit('stderr', `Warning: Could not copy '${include}': ${e.message}\n`);
+    }
+  }
+
+  return [...new Set(copiedFiles)]; // Remove duplicates
+}
 
 /**
  * Ensure database is initialized in the worker process
@@ -30,6 +114,7 @@ async function ensureDatabase() {
  * Execute C++ code
  * @param {Object} params - Job parameters
  * @param {string} params.code - C++ source code
+ * @param {string} params.sourceDir - Source directory (relative to workspace) for resolving local includes
  * @param {string} params.cppEnvironment - Name of C++ environment to use
  * @param {string} params.vendorEnvironment - Name of vendor environment to use
  * @param {string} params.compiler - Compiler to use (g++, clang++)
@@ -40,7 +125,7 @@ async function ensureDatabase() {
  */
 async function executeCpp(params, context) {
   const { emit, jobId } = context;
-  const { code, cppEnvironment, vendorEnvironment, compiler = 'clang++', cppStandard = 'c++23', extraFlags = [] } = params;
+  const { code, sourceDir = '', cppEnvironment, vendorEnvironment, compiler = 'clang++', cppStandard = 'c++23', extraFlags = [] } = params;
 
   if (!code || code.trim().length === 0) {
     throw new Error('No code provided');
@@ -82,13 +167,30 @@ async function executeCpp(params, context) {
     // Write source code to file
     fs.writeFileSync(sourceFile, code);
 
+    // Extract and copy local includes if sourceDir is provided
+    const localIncludes = extractLocalIncludes(code);
+    if (localIncludes.length > 0 && sourceDir) {
+      emit('stdout', `Copying local includes: ${localIncludes.join(', ')}\n`);
+      const copiedFiles = copyLocalIncludes(sourceDir, tmpDir, localIncludes, emit);
+      if (copiedFiles.length > 0) {
+        emit('stdout', `Copied ${copiedFiles.length} local file(s)\n`);
+      }
+    } else if (localIncludes.length > 0 && !sourceDir) {
+      emit('stderr', `Warning: Local includes detected but source directory not provided\n`);
+      emit('stderr', `Local includes may not be resolved: ${localIncludes.join(', ')}\n`);
+    }
+
     // Analyze code for dependencies
     emit('stdout', `Using ${compiler} with ${cppStandard}...\n`);
     const analysis = analyzeCode(code, cppEnv, vendorEnv, { compiler, cppStandard });
 
-    // Show detected dependencies
+    // Show detected dependencies (exclude local includes we already handled)
     if (analysis.includes.length > 0) {
-      const nonStdIncludes = analysis.includes.filter(i => !i.startsWith('c') && !['iostream', 'vector', 'string', 'map', 'set', 'algorithm', 'memory', 'functional', 'fstream', 'sstream'].includes(i));
+      const nonStdIncludes = analysis.includes.filter(i =>
+        !i.startsWith('c') &&
+        !['iostream', 'vector', 'string', 'map', 'set', 'algorithm', 'memory', 'functional', 'fstream', 'sstream'].includes(i) &&
+        !localIncludes.includes(i)
+      );
       if (nonStdIncludes.length > 0) {
         emit('stdout', `Detected includes: ${nonStdIncludes.slice(0, 5).join(', ')}${nonStdIncludes.length > 5 ? '...' : ''}\n`);
       }

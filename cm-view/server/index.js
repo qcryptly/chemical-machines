@@ -41,7 +41,181 @@ app.use(express.static(path.join(__dirname, '../client/dist')));
 
 // API Routes
 
-// Notebooks
+// ================== Workspaces (replaces Notebooks) ==================
+
+// Helper to count files in workspace directory
+async function countFilesInDir(dirPath) {
+  let count = 0;
+  try {
+    const entries = await fs.readdir(dirPath, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
+      if (entry.isDirectory()) {
+        count += await countFilesInDir(path.join(dirPath, entry.name));
+      } else {
+        count++;
+      }
+    }
+  } catch {
+    // Directory doesn't exist or not accessible
+  }
+  return count;
+}
+
+// Helper to get workspace stats (environments + files)
+async function getWorkspaceStats(workspaceId) {
+  const stats = {
+    pythonEnvs: 0,
+    cppEnvs: 0,
+    vendorEnvs: 0,
+    files: 0
+  };
+
+  try {
+    // Get environment counts from compute service
+    const [pythonRes, cppRes, vendorRes] = await Promise.allSettled([
+      axios.get(`${COMPUTE_URL}/environments`),
+      axios.get(`${COMPUTE_URL}/cpp-environments`),
+      axios.get(`${COMPUTE_URL}/vendor-environments`)
+    ]);
+
+    if (pythonRes.status === 'fulfilled') {
+      stats.pythonEnvs = pythonRes.value.data?.environments?.length || 0;
+    }
+    if (cppRes.status === 'fulfilled') {
+      stats.cppEnvs = cppRes.value.data?.environments?.length || 0;
+    }
+    if (vendorRes.status === 'fulfilled') {
+      stats.vendorEnvs = vendorRes.value.data?.environments?.length || 0;
+    }
+
+    // Count files in this workspace's directory
+    if (workspaceId) {
+      const workspaceDir = getWorkspaceDir(workspaceId);
+      stats.files = await countFilesInDir(workspaceDir);
+    }
+  } catch (error) {
+    console.error('Error getting workspace stats:', error.message);
+  }
+
+  return stats;
+}
+
+// List all workspaces with stats
+app.get('/api/workspaces', async (req, res) => {
+  try {
+    const result = await pgPool.query(
+      'SELECT id, name, created_at, updated_at FROM notebooks ORDER BY updated_at DESC'
+    );
+
+    // Get stats for each workspace
+    const workspaces = await Promise.all(
+      result.rows.map(async (workspace) => ({
+        ...workspace,
+        stats: await getWorkspaceStats(workspace.id)
+      }))
+    );
+
+    res.json(workspaces);
+  } catch (error) {
+    console.error('Error fetching workspaces:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get single workspace
+app.get('/api/workspaces/:id', async (req, res) => {
+  try {
+    const result = await pgPool.query(
+      'SELECT * FROM notebooks WHERE id = $1',
+      [req.params.id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Workspace not found' });
+    }
+
+    const workspace = result.rows[0];
+    workspace.stats = await getWorkspaceStats(workspace.id);
+
+    res.json(workspace);
+  } catch (error) {
+    console.error('Error fetching workspace:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create workspace
+app.post('/api/workspaces', async (req, res) => {
+  const { name, cells } = req.body;
+
+  try {
+    const result = await pgPool.query(
+      'INSERT INTO notebooks (name, cells) VALUES ($1, $2) RETURNING *',
+      [name, JSON.stringify(cells || [])]
+    );
+
+    const workspace = result.rows[0];
+
+    // Create workspace directory with example files
+    await createExampleFiles(workspace.id);
+
+    res.json(workspace);
+  } catch (error) {
+    console.error('Error creating workspace:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update workspace
+app.put('/api/workspaces/:id', async (req, res) => {
+  const { name, cells } = req.body;
+
+  try {
+    const result = await pgPool.query(
+      'UPDATE notebooks SET name = $1, cells = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3 RETURNING *',
+      [name, JSON.stringify(cells), req.params.id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Workspace not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating workspace:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete workspace
+app.delete('/api/workspaces/:id', async (req, res) => {
+  try {
+    const result = await pgPool.query(
+      'DELETE FROM notebooks WHERE id = $1 RETURNING id',
+      [req.params.id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Workspace not found' });
+    }
+
+    // Delete workspace directory
+    const workspaceDir = getWorkspaceDir(req.params.id);
+    try {
+      await fs.rm(workspaceDir, { recursive: true });
+    } catch (e) {
+      // Ignore if directory doesn't exist
+    }
+
+    res.json({ success: true, id: result.rows[0].id });
+  } catch (error) {
+    console.error('Error deleting workspace:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Legacy notebook endpoints (kept for backwards compatibility)
 app.get('/api/notebooks', async (req, res) => {
   try {
     const result = await pgPool.query(
@@ -109,13 +283,217 @@ app.put('/api/notebooks/:id', async (req, res) => {
 
 // ================== File Browser API ==================
 
-// Ensure workspace directory exists
-async function ensureWorkspaceDir() {
+// Example files for new workspaces
+const EXAMPLE_FILES = {
+  'file.hpp': `#pragma once
+
+// Example header file
+// This can be included by both example.cpp and example.cell.cpp
+
+#include <string>
+#include <vector>
+
+namespace example {
+
+inline std::string greet(const std::string& name) {
+    return "Hello, " + name + "!";
+}
+
+inline std::vector<int> range(int n) {
+    std::vector<int> result;
+    for (int i = 0; i < n; ++i) {
+        result.push_back(i);
+    }
+    return result;
+}
+
+} // namespace example
+`,
+
+  'example.cpp': `// Single-file C++ example
+// This file is executed as a single unit (no cells)
+// It includes file.hpp from the same directory
+
+#include <iostream>
+#include "file.hpp"
+
+int main() {
+    // Use the greet function from our header
+    std::cout << example::greet("World") << std::endl;
+
+    // Use the range function
+    auto numbers = example::range(5);
+    std::cout << "Numbers: ";
+    for (int n : numbers) {
+        std::cout << n << " ";
+    }
+    std::cout << std::endl;
+
+    return 0;
+}
+`,
+
+  'example.cell.cpp': `// %% Cell 1 - Include and Setup
+// Cell-based C++ example
+// Each cell is compiled and executed independently
+
+#include <iostream>
+#include "file.hpp"
+
+int main() {
+    std::cout << example::greet("Cell 1") << std::endl;
+    return 0;
+}
+
+// %% Cell 2 - Using Range
+#include <iostream>
+#include "file.hpp"
+
+int main() {
+    auto nums = example::range(10);
+    int sum = 0;
+    for (int n : nums) sum += n;
+    std::cout << "Sum of 0-9: " << sum << std::endl;
+    return 0;
+}
+`,
+
+  'utils.py': `"""
+Example Python module
+This can be imported by other Python files in the workspace
+"""
+
+def greet(name: str) -> str:
+    """Return a greeting message"""
+    return f"Hello, {name}!"
+
+def factorial(n: int) -> int:
+    """Calculate factorial recursively"""
+    if n <= 1:
+        return 1
+    return n * factorial(n - 1)
+
+def fibonacci(n: int) -> list[int]:
+    """Generate first n Fibonacci numbers"""
+    if n <= 0:
+        return []
+    if n == 1:
+        return [0]
+
+    fibs = [0, 1]
+    for _ in range(2, n):
+        fibs.append(fibs[-1] + fibs[-2])
+    return fibs
+
+class Counter:
+    """Simple counter class"""
+    def __init__(self, start: int = 0):
+        self.value = start
+
+    def increment(self, by: int = 1) -> int:
+        self.value += by
+        return self.value
+
+    def decrement(self, by: int = 1) -> int:
+        self.value -= by
+        return self.value
+`,
+
+  'example.py': `# Single-file Python example
+# This file is executed as a single unit (no cells)
+# It imports utils.py from the same directory
+
+from utils import greet, factorial, fibonacci, Counter
+
+# Use the greet function
+print(greet("World"))
+
+# Calculate some factorials
+for i in range(1, 6):
+    print(f"{i}! = {factorial(i)}")
+
+# Generate Fibonacci sequence
+fibs = fibonacci(10)
+print(f"First 10 Fibonacci numbers: {fibs}")
+
+# Use the Counter class
+counter = Counter(10)
+print(f"Counter starts at: {counter.value}")
+counter.increment(5)
+print(f"After +5: {counter.value}")
+counter.decrement(3)
+print(f"After -3: {counter.value}")
+`,
+
+  'example.cell.py': `# %% Cell 1 - Basic Import
+# Cell-based Python example
+# Each cell can be run independently
+
+from utils import greet
+
+print(greet("Cell 1"))
+print("This is the first cell")
+
+# %% Cell 2 - Math Functions
+from utils import factorial, fibonacci
+
+# Calculate factorials
+for n in [5, 7, 10]:
+    print(f"{n}! = {factorial(n)}")
+
+# Show Fibonacci sequence
+print(f"Fibonacci(15): {fibonacci(15)}")
+
+# %% Cell 3 - Using Classes
+from utils import Counter
+
+# Create and use a counter
+c = Counter(100)
+print(f"Start: {c.value}")
+
+for i in range(5):
+    c.increment(i * 2)
+    print(f"After +{i*2}: {c.value}")
+`
+};
+
+// Ensure workspace directory exists for a specific workspace
+async function ensureWorkspaceDir(workspaceId = null) {
+  const dir = workspaceId ? path.join(WORKSPACE_DIR, String(workspaceId)) : WORKSPACE_DIR;
   try {
-    await fs.access(WORKSPACE_DIR);
+    await fs.access(dir);
   } catch {
-    await fs.mkdir(WORKSPACE_DIR, { recursive: true });
+    await fs.mkdir(dir, { recursive: true });
   }
+  return dir;
+}
+
+// Create example files for a new workspace
+async function createExampleFiles(workspaceId) {
+  const workspaceDir = await ensureWorkspaceDir(workspaceId);
+
+  for (const [filename, content] of Object.entries(EXAMPLE_FILES)) {
+    const filePath = path.join(workspaceDir, filename);
+    try {
+      // Only create if doesn't exist
+      await fs.access(filePath);
+    } catch {
+      await fs.writeFile(filePath, content, 'utf-8');
+    }
+  }
+
+  // Create __init__.py for Python package imports
+  const initPath = path.join(workspaceDir, '__init__.py');
+  try {
+    await fs.access(initPath);
+  } catch {
+    await fs.writeFile(initPath, '# Workspace package - auto-generated\n', 'utf-8');
+  }
+}
+
+// Get workspace directory path
+function getWorkspaceDir(workspaceId) {
+  return path.join(WORKSPACE_DIR, String(workspaceId));
 }
 
 // Build file tree recursively
@@ -159,20 +537,23 @@ async function buildFileTree(dirPath, basePath = '') {
   });
 }
 
-// Validate path to prevent directory traversal
-function validatePath(userPath) {
-  const resolved = path.resolve(WORKSPACE_DIR, userPath);
-  if (!resolved.startsWith(path.resolve(WORKSPACE_DIR))) {
+// Validate path to prevent directory traversal (workspace-specific)
+function validateWorkspacePath(workspaceId, userPath) {
+  const workspaceDir = getWorkspaceDir(workspaceId);
+  const resolved = path.resolve(workspaceDir, userPath);
+  if (!resolved.startsWith(path.resolve(workspaceDir))) {
     throw new Error('Invalid path');
   }
   return resolved;
 }
 
-// List files
-app.get('/api/files', async (req, res) => {
+// ================== Workspace-specific File API ==================
+
+// List files in a workspace
+app.get('/api/workspaces/:workspaceId/files', async (req, res) => {
   try {
-    await ensureWorkspaceDir();
-    const files = await buildFileTree(WORKSPACE_DIR);
+    const workspaceDir = await ensureWorkspaceDir(req.params.workspaceId);
+    const files = await buildFileTree(workspaceDir);
     res.json({ files });
   } catch (error) {
     console.error('Error listing files:', error);
@@ -180,10 +561,10 @@ app.get('/api/files', async (req, res) => {
   }
 });
 
-// Get file content
-app.get('/api/files/:path(*)', async (req, res) => {
+// Get file content in a workspace
+app.get('/api/workspaces/:workspaceId/files/:path(*)', async (req, res) => {
   try {
-    const filePath = validatePath(req.params.path);
+    const filePath = validateWorkspacePath(req.params.workspaceId, req.params.path);
     const stats = await fs.stat(filePath);
 
     if (stats.isDirectory()) {
@@ -208,8 +589,8 @@ app.get('/api/files/:path(*)', async (req, res) => {
   }
 });
 
-// Create file or folder
-app.post('/api/files', async (req, res) => {
+// Create file or folder in a workspace
+app.post('/api/workspaces/:workspaceId/files', async (req, res) => {
   const { path: filePath, type, content = '' } = req.body;
 
   if (!filePath) {
@@ -217,8 +598,8 @@ app.post('/api/files', async (req, res) => {
   }
 
   try {
-    await ensureWorkspaceDir();
-    const fullPath = validatePath(filePath);
+    await ensureWorkspaceDir(req.params.workspaceId);
+    const fullPath = validateWorkspacePath(req.params.workspaceId, filePath);
 
     // Check if already exists
     try {
@@ -244,16 +625,16 @@ app.post('/api/files', async (req, res) => {
   }
 });
 
-// Update file content or rename
-app.put('/api/files/:path(*)', async (req, res) => {
+// Update file content or rename in a workspace
+app.put('/api/workspaces/:workspaceId/files/:path(*)', async (req, res) => {
   const { content, newPath } = req.body;
 
   try {
-    const fullPath = validatePath(req.params.path);
+    const fullPath = validateWorkspacePath(req.params.workspaceId, req.params.path);
 
     if (newPath !== undefined) {
       // Rename/move
-      const newFullPath = validatePath(newPath);
+      const newFullPath = validateWorkspacePath(req.params.workspaceId, newPath);
       const parentDir = path.dirname(newFullPath);
       await fs.mkdir(parentDir, { recursive: true });
       await fs.rename(fullPath, newFullPath);
@@ -275,10 +656,10 @@ app.put('/api/files/:path(*)', async (req, res) => {
   }
 });
 
-// Delete file or folder
-app.delete('/api/files/:path(*)', async (req, res) => {
+// Delete file or folder in a workspace
+app.delete('/api/workspaces/:workspaceId/files/:path(*)', async (req, res) => {
   try {
-    const fullPath = validatePath(req.params.path);
+    const fullPath = validateWorkspacePath(req.params.workspaceId, req.params.path);
     const stats = await fs.stat(fullPath);
 
     if (stats.isDirectory()) {
@@ -585,6 +966,17 @@ app.get('/api/debian-packages/search', async (req, res) => {
     res.json(response.data);
   } catch (error) {
     console.error('Error searching debian packages:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get C++ compiler versions
+app.get('/api/compilers', async (req, res) => {
+  try {
+    const response = await axios.get(`${COMPUTE_URL}/compilers`);
+    res.json(response.data);
+  } catch (error) {
+    console.error('Error fetching compiler versions:', error);
     res.status(500).json({ error: error.message });
   }
 });

@@ -103,7 +103,7 @@ Environment variables can be set in `docker-compose.yml`:
 
 ## License
 
-MIT
+See dual license in LICENSE.md
 
 ## Contributing
 

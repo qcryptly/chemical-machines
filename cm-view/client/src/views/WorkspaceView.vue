@@ -15,9 +15,17 @@
             title="Environments"
           >Envs</button>
         </div>
-        <button @click="sidebarOpen = !sidebarOpen" class="toggle-btn">
-          {{ sidebarOpen ? '◀' : '▶' }}
-        </button>
+        <div class="header-actions">
+          <button @click="showProfileDialog = true" class="profile-btn" :title="activeProfile ? activeProfile.name : 'Profile'">
+            <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
+              <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+            </svg>
+            <span class="profile-indicator" v-if="activeProfile"></span>
+          </button>
+          <button @click="sidebarOpen = !sidebarOpen" class="toggle-btn">
+            {{ sidebarOpen ? '◀' : '▶' }}
+          </button>
+        </div>
       </div>
 
       <!-- File Browser Tab -->
@@ -67,7 +75,10 @@
                 <span class="env-python">Python {{ env.pythonVersion }}</span>
               </div>
               <div class="env-meta">
-                <span class="pkg-count">{{ env.packageCount }} packages</span>
+                <span class="pkg-count clickable" @click.stop="openEnvDetail(env, 'python')">
+                  <svg class="pkg-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+                  {{ env.packageCount }} packages
+                </span>
                 <button
                   v-if="!env.isBase && env.name !== 'chemcomp'"
                   @click.stop="deleteEnvironment(env.name)"
@@ -114,7 +125,10 @@
                 <span class="env-lang">C++</span>
               </div>
               <div class="env-meta">
-                <span class="pkg-count">{{ env.packages?.length || 0 }} packages</span>
+                <span class="pkg-count clickable" @click.stop="openEnvDetail(env, 'cpp')">
+                  <svg class="pkg-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M20 7h-4V4c0-1.1-.9-2-2-2h-4c-1.1 0-2 .9-2 2v3H4c-1.1 0-2 .9-2 2v11c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V9c0-1.1-.9-2-2-2zM10 4h4v3h-4V4zm1 13v-3H8v-2h3V9h2v3h3v2h-3v3h-2z"/></svg>
+                  {{ env.packages?.length || 0 }} packages
+                </span>
                 <button
                   @click.stop="deleteCppEnvironment(env.name)"
                   class="delete-env-btn"
@@ -391,6 +405,22 @@
       @close="showVendorDialog = false"
       @created="handleVendorEnvCreated"
     />
+
+    <!-- Environment Detail Dialog -->
+    <EnvironmentDetailDialog
+      v-if="showEnvDetailDialog && selectedEnvForDetail"
+      :environment="selectedEnvForDetail"
+      :env-type="selectedEnvTypeForDetail"
+      @close="showEnvDetailDialog = false"
+      @updated="handleEnvDetailUpdated"
+    />
+
+    <!-- Profile Dialog -->
+    <ProfileDialog
+      v-if="showProfileDialog"
+      @close="showProfileDialog = false"
+      @updated="handleProfileUpdated"
+    />
   </div>
 </template>
 
@@ -404,6 +434,8 @@ import CodeCell from '../components/CodeCell.vue'
 import FileBrowser from '../components/FileBrowser.vue'
 import CppEnvironmentDialog from '../components/CppEnvironmentDialog.vue'
 import VendorEnvironmentDialog from '../components/VendorEnvironmentDialog.vue'
+import EnvironmentDetailDialog from '../components/EnvironmentDetailDialog.vue'
+import ProfileDialog from '../components/ProfileDialog.vue'
 
 const route = useRoute()
 const viewport = ref(null)
@@ -448,6 +480,15 @@ const vendorEnvironmentNames = computed(() => vendorEnvironments.value.map(e => 
 const showCreateDialog = ref(false)
 const showCppDialog = ref(false)
 const showVendorDialog = ref(false)
+
+// Environment detail dialog
+const showEnvDetailDialog = ref(false)
+const selectedEnvForDetail = ref(null)
+const selectedEnvTypeForDetail = ref('python')
+
+// Profile
+const showProfileDialog = ref(false)
+const activeProfile = ref(null)
 const newEnvName = ref('')
 const newEnvPython = ref('3.12')
 const newEnvPackages = ref('')
@@ -793,6 +834,35 @@ async function deleteEnvironment(name) {
     console.error('Error deleting environment:', error)
     alert(`Failed to delete: ${error.response?.data?.error || error.message}`)
   }
+}
+
+function openEnvDetail(env, envType) {
+  selectedEnvForDetail.value = env
+  selectedEnvTypeForDetail.value = envType
+  showEnvDetailDialog.value = true
+}
+
+function handleEnvDetailUpdated() {
+  if (selectedEnvTypeForDetail.value === 'python') {
+    loadEnvironments()
+  } else {
+    loadCppEnvironments()
+  }
+}
+
+// ================== Profile Functions ==================
+
+async function loadProfile() {
+  try {
+    const response = await axios.get('/api/profile')
+    activeProfile.value = response.data
+  } catch (error) {
+    console.error('Error loading profile:', error)
+  }
+}
+
+function handleProfileUpdated(profile) {
+  activeProfile.value = profile
 }
 
 // ================== C++ Environment Functions ==================
@@ -1743,7 +1813,8 @@ onMounted(async () => {
     loadPythonVersions(),
     loadCppEnvironments(),
     loadVendorEnvironments(),
-    loadCompilers()
+    loadCompilers(),
+    loadProfile()
   ])
   await nextTick()
   initThree()
@@ -1822,6 +1893,45 @@ onUnmounted(() => {
   border-color: var(--border);
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-left: auto;
+}
+
+.profile-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.profile-btn:hover {
+  color: var(--accent);
+  border-color: var(--border);
+  background: var(--bg-primary);
+}
+
+.profile-indicator {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  width: 6px;
+  height: 6px;
+  background: #4ade80;
+  border-radius: 50%;
+  border: 1px solid var(--bg-tertiary);
+}
+
 .toggle-btn {
   width: 24px;
   height: 24px;
@@ -1831,7 +1941,6 @@ onUnmounted(() => {
   color: var(--text-secondary);
   cursor: pointer;
   font-size: 0.7rem;
-  margin-left: auto;
 }
 
 .toggle-btn:hover {
@@ -1986,6 +2095,31 @@ onUnmounted(() => {
 .pkg-count {
   font-size: 0.7rem;
   color: var(--text-secondary);
+}
+
+.pkg-count.clickable {
+  cursor: pointer;
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  transition: background 0.15s, color 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.pkg-count.clickable:hover {
+  background: rgba(0, 212, 255, 0.2);
+  color: var(--accent);
+}
+
+.pkg-icon {
+  width: 12px;
+  height: 12px;
+  opacity: 0.7;
+}
+
+.pkg-count.clickable:hover .pkg-icon {
+  opacity: 1;
 }
 
 .delete-env-btn {

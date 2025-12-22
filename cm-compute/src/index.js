@@ -8,6 +8,7 @@ const { execSync } = require('child_process');
 const { ComputeQueue, JobListener } = require('./compute');
 const { createMainLogger } = require('./logger');
 const database = require('./database');
+const terminal = require('./terminal');
 
 // Initialize main logger
 const logger = createMainLogger();
@@ -964,6 +965,46 @@ async function start() {
               jobId: data.jobId,
               success: cancelled
             }));
+
+          } else if (data.type === 'terminal_create') {
+            // Create a new terminal session for a workspace
+            const { workspaceId } = data;
+            const emit = (type, payload) => {
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type, ...payload }));
+              }
+            };
+
+            const sessionId = terminal.createSession(workspaceId, emit);
+            ws.terminalSessions = ws.terminalSessions || new Set();
+            ws.terminalSessions.add(sessionId);
+
+            ws.send(JSON.stringify({
+              type: 'terminal_created',
+              sessionId,
+              workspaceId
+            }));
+
+            logger.info('Terminal session created', { sessionId, workspaceId });
+
+          } else if (data.type === 'terminal_input') {
+            // Write input to terminal
+            const { sessionId, data: inputData } = data;
+            terminal.writeToSession(sessionId, inputData);
+
+          } else if (data.type === 'terminal_resize') {
+            // Resize terminal
+            const { sessionId, cols, rows } = data;
+            terminal.resizeSession(sessionId, cols, rows);
+
+          } else if (data.type === 'terminal_destroy') {
+            // Destroy terminal session
+            const { sessionId } = data;
+            terminal.destroySession(sessionId);
+            if (ws.terminalSessions) {
+              ws.terminalSessions.delete(sessionId);
+            }
+            logger.info('Terminal session destroyed', { sessionId });
           }
         } catch (error) {
           logger.error('WebSocket message error', { error: error.message });
@@ -979,6 +1020,13 @@ async function start() {
         if (ws.unsubscribers) {
           ws.unsubscribers.forEach(unsubscribe => unsubscribe());
           ws.unsubscribers.clear();
+        }
+        // Clean up terminal sessions
+        if (ws.terminalSessions) {
+          ws.terminalSessions.forEach(sessionId => {
+            terminal.destroySession(sessionId);
+          });
+          ws.terminalSessions.clear();
         }
         clients.delete(ws);
         logger.info('WebSocket client disconnected', { totalClients: clients.size });

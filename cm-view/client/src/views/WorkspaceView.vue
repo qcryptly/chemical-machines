@@ -31,6 +31,7 @@
       <!-- File Browser Tab -->
       <div class="sidebar-content" v-if="sidebarOpen && sidebarTab === 'files'">
         <FileBrowser
+          ref="fileBrowserRef"
           :workspace-id="workspaceId"
           @file-open="handleFileOpen"
           @file-select="handleFileSelect"
@@ -217,25 +218,52 @@
       <!-- Resize Handle (Horizontal) -->
       <div class="resize-handle-h" @mousedown="startResize"></div>
 
-      <!-- Bottom Panel: Code Cells -->
+      <!-- Bottom Panel: Code Cells / Terminal -->
       <div class="notebook-panel">
-        <!-- Tab Bar -->
-        <div class="tab-bar" v-if="openTabs.length > 0">
-          <div
-            v-for="(tab, index) in openTabs"
-            :key="tab.path"
-            class="tab"
-            :class="{ active: index === activeTabIndex, dirty: tab.isDirty }"
-            @click="switchToTab(index)"
-            :title="tab.path"
-          >
-            <span class="tab-icon">{{ getFileIcon(tab.name) }}</span>
-            <span class="tab-name">{{ tab.name }}</span>
-            <span v-if="tab.isDirty" class="tab-dirty-indicator">●</span>
-            <button class="tab-close" @click.stop="closeTab(index)" title="Close">×</button>
+        <!-- Mode Toggle Bar -->
+        <div class="mode-toggle-bar">
+          <div class="mode-tabs">
+            <button
+              :class="{ active: bottomPanelMode === 'editor' }"
+              @click="bottomPanelMode = 'editor'"
+              title="Code Editor"
+            >
+              <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
+                <path d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/>
+              </svg>
+              Editor
+            </button>
+            <button
+              :class="{ active: bottomPanelMode === 'terminal' }"
+              @click="bottomPanelMode = 'terminal'; $nextTick(() => terminalRef?.focus())"
+              title="Terminal"
+            >
+              <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
+                <path d="M20 19V7H4v12h16m0-16a2 2 0 012 2v14a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h16m-7 14v-2h5v2h-5m-3.42-4L5.57 9H8.4l3.3 3.3c.39.39.39 1.03 0 1.42L8.42 17H5.59l4-4z"/>
+              </svg>
+              Terminal
+            </button>
+          </div>
+          <!-- File tabs (only shown in editor mode) -->
+          <div class="tab-bar" v-if="bottomPanelMode === 'editor' && openTabs.length > 0">
+            <div
+              v-for="(tab, index) in openTabs"
+              :key="tab.path"
+              class="tab"
+              :class="{ active: index === activeTabIndex, dirty: tab.isDirty }"
+              @click="switchToTab(index)"
+              :title="tab.path"
+            >
+              <span class="tab-icon">{{ getFileIcon(tab.name) }}</span>
+              <span class="tab-name">{{ tab.name }}</span>
+              <span v-if="tab.isDirty" class="tab-dirty-indicator">●</span>
+              <button class="tab-close" @click.stop="closeTab(index)" title="Close">×</button>
+            </div>
           </div>
         </div>
 
+        <!-- Editor View -->
+        <template v-if="bottomPanelMode === 'editor'">
         <div class="panel-header">
           <div class="file-info" v-if="currentFile">
             <span class="file-name" :class="{ modified: hasUnsavedChanges }">
@@ -325,6 +353,17 @@
           <p class="hint">Use <code># %%</code> in <code>.cell.py</code> / <code>.sh</code> or <code>// %%</code> in <code>.cell.cpp</code> for cell boundaries</p>
           <p class="hint">Regular <code>.py</code> and <code>.cpp/.c/.h/.hpp</code> files are single execution units</p>
           <p class="hint">Import workspace modules with <code>from workspace import module</code></p>
+        </div>
+        </template>
+
+        <!-- Terminal View -->
+        <div class="terminal-view" v-if="bottomPanelMode === 'terminal'">
+          <Terminal
+            ref="terminalRef"
+            :workspace-id="workspaceId"
+            :active="bottomPanelMode === 'terminal'"
+            @files-changed="refreshFiles"
+          />
         </div>
       </div>
     </div>
@@ -436,6 +475,7 @@ import CppEnvironmentDialog from '../components/CppEnvironmentDialog.vue'
 import VendorEnvironmentDialog from '../components/VendorEnvironmentDialog.vue'
 import EnvironmentDetailDialog from '../components/EnvironmentDetailDialog.vue'
 import ProfileDialog from '../components/ProfileDialog.vue'
+import Terminal from '../components/Terminal.vue'
 
 const route = useRoute()
 const viewport = ref(null)
@@ -452,6 +492,11 @@ function fileApiUrl(filePath = '') {
 // Sidebar state
 const sidebarOpen = ref(true)
 const sidebarTab = ref('files')
+
+// Bottom panel mode: 'editor' or 'terminal'
+const bottomPanelMode = ref('editor')
+const terminalRef = ref(null)
+const fileBrowserRef = ref(null)
 
 // Environment state (Python/Conda)
 const environments = ref([])
@@ -1382,6 +1427,13 @@ function handleJobResult(cell, result) {
 
 // ================== File Browser Functions ==================
 
+function refreshFiles() {
+  // Refresh the file browser when terminal creates/modifies files
+  if (fileBrowserRef.value?.refresh) {
+    fileBrowserRef.value.refresh()
+  }
+}
+
 async function handleFileOpen(file) {
   // With tabs, we can open files without losing unsaved changes
   await openFile(file)
@@ -2279,10 +2331,67 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-.tab-bar {
+/* Mode Toggle Bar */
+.mode-toggle-bar {
   display: flex;
+  align-items: center;
   background: var(--bg-tertiary);
   border-bottom: 1px solid var(--border);
+  padding: 0 0.5rem;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.mode-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0.35rem 0;
+}
+
+.mode-tabs button {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.6rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: all 0.15s;
+}
+
+.mode-tabs button:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.mode-tabs button.active {
+  background: var(--bg-primary);
+  border-color: var(--border);
+  color: var(--accent);
+}
+
+.mode-tabs button svg {
+  opacity: 0.7;
+}
+
+.mode-tabs button.active svg {
+  opacity: 1;
+}
+
+/* Terminal View */
+.terminal-view {
+  flex: 1;
+  overflow: hidden;
+  background: #0a0a12;
+}
+
+.tab-bar {
+  display: flex;
+  flex: 1;
+  background: transparent;
   overflow-x: auto;
   flex-shrink: 0;
 }

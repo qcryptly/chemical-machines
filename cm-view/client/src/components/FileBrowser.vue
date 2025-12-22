@@ -357,6 +357,9 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('click', hideContextMenu)
 })
+
+// Expose refresh method for parent components
+defineExpose({ refresh })
 </script>
 
 <style scoped>

@@ -15,6 +15,8 @@ const createCondaEnvironment = require('./create-conda-environment');
 const createCppEnvironment = require('./create-cpp-environment');
 const createVendorEnvironment = require('./create-vendor-environment');
 const executeCpp = require('./execute-cpp');
+const installCondaPackage = require('./install-conda-package');
+const removeCondaPackage = require('./remove-conda-package');
 
 // Registry of job types to handler functions
 const jobRegistry = new Map();
@@ -68,6 +70,8 @@ registerJob('create_environment', createCondaEnvironment);
 registerJob('create_cpp_environment', createCppEnvironment);
 registerJob('create_vendor_environment', createVendorEnvironment);
 registerJob('execute_cpp', executeCpp);
+registerJob('install_conda_package', installCondaPackage);
+registerJob('remove_conda_package', removeCondaPackage);
 
 module.exports = {
   jobRegistry,

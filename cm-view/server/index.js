@@ -981,6 +981,64 @@ app.get('/api/compilers', async (req, res) => {
   }
 });
 
+// ================== Profile Proxy ==================
+
+// Get active profile
+app.get('/api/profile', async (req, res) => {
+  try {
+    const response = await axios.get(`${COMPUTE_URL}/profile`);
+    res.json(response.data);
+  } catch (error) {
+    console.error('Error fetching profile:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create or update profile
+app.post('/api/profile', async (req, res) => {
+  try {
+    const response = await axios.post(`${COMPUTE_URL}/profile`, req.body);
+    res.json(response.data);
+  } catch (error) {
+    console.error('Error saving profile:', error);
+    if (error.response) {
+      res.status(error.response.status).json(error.response.data);
+    } else {
+      res.status(500).json({ error: error.message });
+    }
+  }
+});
+
+// Generate SSH key
+app.post('/api/profile/:id/generate-ssh-key', async (req, res) => {
+  try {
+    const response = await axios.post(`${COMPUTE_URL}/profile/${req.params.id}/generate-ssh-key`);
+    res.json(response.data);
+  } catch (error) {
+    console.error('Error generating SSH key:', error);
+    if (error.response) {
+      res.status(error.response.status).json(error.response.data);
+    } else {
+      res.status(500).json({ error: error.message });
+    }
+  }
+});
+
+// Get public SSH key
+app.get('/api/profile/:id/ssh-key', async (req, res) => {
+  try {
+    const response = await axios.get(`${COMPUTE_URL}/profile/${req.params.id}/ssh-key`);
+    res.json(response.data);
+  } catch (error) {
+    console.error('Error fetching SSH key:', error);
+    if (error.response?.status === 404) {
+      res.status(404).json({ error: 'No SSH key found' });
+    } else {
+      res.status(500).json({ error: error.message });
+    }
+  }
+});
+
 // WebSocket connection to cm-compute
 let computeWs = null;
 const clientToCompute = new Map(); // Map client cell requests to compute responses

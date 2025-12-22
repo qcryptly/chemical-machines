@@ -4,6 +4,7 @@ const path = require('path');
 const Job = require('./job');
 const CppEnvironment = require('./cpp-environment');
 const VendorEnvironment = require('./vendor-environment');
+const Profile = require('./profile');
 
 let pool = null;
 let models = null;
@@ -57,7 +58,8 @@ async function initialize(config = {}) {
   models = {
     Job: new Job(pgPool),
     CppEnvironment: new CppEnvironment(pgPool),
-    VendorEnvironment: new VendorEnvironment(pgPool)
+    VendorEnvironment: new VendorEnvironment(pgPool),
+    Profile: new Profile(pgPool)
   };
 
   return { pool: pgPool, models };

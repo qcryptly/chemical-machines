@@ -4,7 +4,7 @@ const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
 const { Client } = require('elasticsearch');
-const { spawn, execSync } = require('child_process');
+const { execSync } = require('child_process');
 const { ComputeQueue, JobListener } = require('./compute');
 const { createMainLogger } = require('./logger');
 const database = require('./database');
@@ -272,7 +272,7 @@ app.delete('/environments/:name', (req, res) => {
 });
 
 // Install packages in environment
-app.post('/environments/:name/packages', (req, res) => {
+app.post('/environments/:name/packages', async (req, res) => {
   const { name } = req.params;
   const { packages, channel = null } = req.body;
 
@@ -280,35 +280,62 @@ app.post('/environments/:name/packages', (req, res) => {
     return res.status(400).json({ error: 'Packages array required' });
   }
 
-  logger.info('Installing packages', { environment: name, packages, channel });
+  try {
+    logger.info('Installing packages', { environment: name, packages, channel });
 
-  const args = ['install', '-n', name, '-y', ...packages];
-  if (channel) {
-    args.splice(1, 0, '-c', channel);
+    const job = await Job.create({
+      type: 'install_conda_package',
+      params: { envName: name, packages, channel },
+      priority: 5
+    });
+
+    const jobId = job.id.toString();
+    computeQueue.enqueue({ ...job, id: jobId });
+
+    res.json({
+      jobId,
+      status: 'queued',
+      environment: name,
+      packages,
+      message: `Installing ${packages.join(', ')} in '${name}'...`
+    });
+  } catch (error) {
+    logger.error('Failed to queue package installation', { environment: name, packages, error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Remove package from environment
+app.delete('/environments/:name/packages/:packageName', async (req, res) => {
+  const { name, packageName } = req.params;
+
+  if (!packageName) {
+    return res.status(400).json({ error: 'Package name required' });
   }
 
-  const installProcess = spawn(`${CONDA_PATH}/bin/conda`, args, {
-    stdio: ['ignore', 'pipe', 'pipe']
-  });
+  try {
+    logger.info('Removing package', { environment: name, packageName });
 
-  let stderr = '';
-  installProcess.stderr.on('data', (data) => { stderr += data.toString(); });
+    const job = await Job.create({
+      type: 'remove_conda_package',
+      params: { envName: name, packageName },
+      priority: 5
+    });
 
-  installProcess.on('close', (code) => {
-    if (code === 0) {
-      logger.info('Installed packages', { environment: name, packages });
-    } else {
-      logger.error('Failed to install packages', { environment: name, packages, stderr, exitCode: code });
-      console.error(`Failed to install packages in ${name}:`, stderr);
-    }
-  });
+    const jobId = job.id.toString();
+    computeQueue.enqueue({ ...job, id: jobId });
 
-  res.json({
-    status: 'installing',
-    environment: name,
-    packages,
-    message: `Installing ${packages.join(', ')} in '${name}'...`
-  });
+    res.json({
+      jobId,
+      status: 'queued',
+      environment: name,
+      packageName,
+      message: `Removing '${packageName}' from '${name}'...`
+    });
+  } catch (error) {
+    logger.error('Failed to queue package removal', { environment: name, packageName, error: error.message });
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Get packages in environment
@@ -611,6 +638,172 @@ app.delete('/vendor-environments/:name', async (req, res) => {
   }
 });
 
+// ================== Profile Management ==================
+
+let Profile = null;
+
+// Get active profile
+app.get('/profile', async (req, res) => {
+  try {
+    const profile = await Profile.getActive();
+    if (profile) {
+      // Don't send private key to client
+      const { ssh_private_key, ...safeProfile } = profile;
+      res.json(safeProfile);
+    } else {
+      res.json(null);
+    }
+  } catch (error) {
+    logger.error('Error getting profile', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create or update profile
+app.post('/profile', async (req, res) => {
+  const { name, email } = req.body;
+
+  if (!name || !email) {
+    return res.status(400).json({ error: 'Name and email are required' });
+  }
+
+  try {
+    let profile = await Profile.findByEmail(email);
+
+    if (profile) {
+      // Update existing profile
+      profile = await Profile.update(profile.id, { name, email });
+    } else {
+      // Create new profile
+      profile = await Profile.create({ name, email });
+    }
+
+    const { ssh_private_key, ...safeProfile } = profile;
+    res.json(safeProfile);
+  } catch (error) {
+    logger.error('Error saving profile', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Generate SSH key pair
+app.post('/profile/:id/generate-ssh-key', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const profile = await Profile.findById(id);
+    if (!profile) {
+      return res.status(404).json({ error: 'Profile not found' });
+    }
+
+    const os = require('os');
+
+    // Create a temporary directory for key generation
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ssh-'));
+    const keyPath = path.join(tmpDir, 'id_ed25519');
+
+    try {
+      // Generate ED25519 key (more secure and shorter than RSA)
+      execSync(`ssh-keygen -t ed25519 -C "${profile.email}" -f "${keyPath}" -N ""`, {
+        encoding: 'utf-8',
+        stdio: 'pipe'
+      });
+
+      // Read the generated keys
+      const privateKey = fs.readFileSync(keyPath, 'utf-8');
+      const publicKey = fs.readFileSync(`${keyPath}.pub`, 'utf-8').trim();
+
+      // Generate fingerprint
+      const fingerprintOutput = execSync(`ssh-keygen -lf "${keyPath}.pub"`, { encoding: 'utf-8' });
+      const fingerprint = fingerprintOutput.split(' ')[1];
+
+      // Save keys to profile
+      await Profile.setSSHKeys(id, { publicKey, privateKey, fingerprint });
+
+      // Configure git to use this key
+      const sshDir = path.join(os.homedir(), '.ssh');
+      if (!fs.existsSync(sshDir)) {
+        fs.mkdirSync(sshDir, { mode: 0o700 });
+      }
+
+      // Write the private key to ~/.ssh/id_ed25519_chemicalmachines
+      const sshKeyPath = path.join(sshDir, 'id_ed25519_chemicalmachines');
+      fs.writeFileSync(sshKeyPath, privateKey, { mode: 0o600 });
+      fs.writeFileSync(`${sshKeyPath}.pub`, publicKey, { mode: 0o644 });
+
+      // Add SSH config entry for GitHub
+      const sshConfigPath = path.join(sshDir, 'config');
+      let sshConfig = '';
+      if (fs.existsSync(sshConfigPath)) {
+        sshConfig = fs.readFileSync(sshConfigPath, 'utf-8');
+      }
+
+      // Check if we already have a config for github.com
+      if (!sshConfig.includes('Host github.com') || !sshConfig.includes('id_ed25519_chemicalmachines')) {
+        const githubConfig = `
+# Chemical Machines - GitHub
+Host github.com
+  HostName github.com
+  User git
+  IdentityFile ${sshKeyPath}
+  IdentitiesOnly yes
+`;
+        // Only add if not already present
+        if (!sshConfig.includes('id_ed25519_chemicalmachines')) {
+          fs.appendFileSync(sshConfigPath, githubConfig);
+          fs.chmodSync(sshConfigPath, 0o600);
+        }
+      }
+
+      // Configure git user
+      try {
+        execSync(`git config --global user.name "${profile.name}"`, { stdio: 'pipe' });
+        execSync(`git config --global user.email "${profile.email}"`, { stdio: 'pipe' });
+      } catch (e) {
+        logger.warn('Could not configure git user', { error: e.message });
+      }
+
+      // Clean up temp files
+      fs.unlinkSync(keyPath);
+      fs.unlinkSync(`${keyPath}.pub`);
+      fs.rmdirSync(tmpDir);
+
+      res.json({
+        publicKey,
+        fingerprint,
+        message: 'SSH key generated and configured successfully'
+      });
+    } catch (keyError) {
+      // Clean up on error
+      try {
+        if (fs.existsSync(keyPath)) fs.unlinkSync(keyPath);
+        if (fs.existsSync(`${keyPath}.pub`)) fs.unlinkSync(`${keyPath}.pub`);
+        if (fs.existsSync(tmpDir)) fs.rmdirSync(tmpDir);
+      } catch (e) {}
+      throw keyError;
+    }
+  } catch (error) {
+    logger.error('Error generating SSH key', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get public SSH key
+app.get('/profile/:id/ssh-key', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const publicKey = await Profile.getPublicKey(id);
+    if (!publicKey) {
+      return res.status(404).json({ error: 'No SSH key found' });
+    }
+    res.json({ publicKey });
+  } catch (error) {
+    logger.error('Error getting SSH key', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ================== Job Management ==================
 
 // Cancel job
@@ -642,6 +835,7 @@ async function start() {
     Job = db.models.Job;
     CppEnvironment = db.models.CppEnvironment;
     VendorEnvironment = db.models.VendorEnvironment;
+    Profile = db.models.Profile;
     logger.info('Database initialized');
     console.log('Database initialized');
 

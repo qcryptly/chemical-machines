@@ -1043,6 +1043,7 @@ app.get('/api/profile/:id/ssh-key', async (req, res) => {
 let computeWs = null;
 const clientToCompute = new Map(); // Map client cell requests to compute responses
 const jobSubscriptions = new Map(); // Map jobId -> Set of subscribed WebSocket clients
+const terminalSessions = new Map(); // Map sessionId -> client WebSocket
 
 function connectToCompute() {
   computeWs = new WebSocket(COMPUTE_WS_URL);
@@ -1085,6 +1086,32 @@ function connectToCompute() {
         const streamLower = data.stream?.toLowerCase();
         if (streamLower === 'result' || streamLower === 'error' || streamLower === 'complete') {
           jobSubscriptions.delete(data.jobId);
+        }
+      }
+
+      // Handle terminal_created - map session to pending client
+      if (data.type === 'terminal_created') {
+        // Find the client that requested this terminal
+        for (const client of wss.clients) {
+          if (client.pendingTerminalCreate && client.readyState === WebSocket.OPEN) {
+            terminalSessions.set(data.sessionId, client);
+            client.pendingTerminalCreate = false;
+            client.send(JSON.stringify(data));
+            break;
+          }
+        }
+      }
+
+      // Forward terminal messages to the appropriate client
+      if (data.sessionId && terminalSessions.has(data.sessionId)) {
+        const clientWs = terminalSessions.get(data.sessionId);
+        if (clientWs.readyState === WebSocket.OPEN) {
+          clientWs.send(JSON.stringify(data));
+        }
+
+        // Clean up on terminal exit
+        if (data.type === 'terminal_exit') {
+          terminalSessions.delete(data.sessionId);
         }
       }
     } catch (error) {
@@ -1180,6 +1207,23 @@ wss.on('connection', (ws) => {
             jobId: data.jobId
           }));
         }
+
+      } else if (data.type === 'terminal_create') {
+        // Create terminal session - forward to compute and track response
+        ws.pendingTerminalCreate = true;
+        if (computeWs && computeWs.readyState === WebSocket.OPEN) {
+          computeWs.send(JSON.stringify(data));
+        }
+
+      } else if (data.type === 'terminal_input' || data.type === 'terminal_resize' || data.type === 'terminal_destroy') {
+        // Forward terminal commands to compute
+        if (computeWs && computeWs.readyState === WebSocket.OPEN) {
+          computeWs.send(JSON.stringify(data));
+        }
+        // Clean up session tracking on destroy
+        if (data.type === 'terminal_destroy' && data.sessionId) {
+          terminalSessions.delete(data.sessionId);
+        }
       }
     } catch (error) {
       ws.send(JSON.stringify({
@@ -1202,6 +1246,19 @@ wss.on('connection', (ws) => {
       subscribers.delete(ws);
       if (subscribers.size === 0) {
         jobSubscriptions.delete(jobId);
+      }
+    }
+    // Clean up terminal sessions for this client
+    for (const [sessionId, clientWs] of terminalSessions.entries()) {
+      if (clientWs === ws) {
+        // Tell compute to destroy the session
+        if (computeWs && computeWs.readyState === WebSocket.OPEN) {
+          computeWs.send(JSON.stringify({
+            type: 'terminal_destroy',
+            sessionId
+          }));
+        }
+        terminalSessions.delete(sessionId);
       }
     }
   });

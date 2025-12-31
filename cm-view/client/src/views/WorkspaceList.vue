@@ -26,6 +26,14 @@
             @keyup.escape="cancelCreating"
             @blur="handleInputBlur"
           />
+          <div class="template-select" v-if="templates.length > 0">
+            <label class="template-label">Template:</label>
+            <select v-model="selectedTemplate" class="template-dropdown">
+              <option v-for="template in templates" :key="template" :value="template">
+                {{ template }}{{ template === 'default' ? ' (recommended)' : '' }}
+              </option>
+            </select>
+          </div>
           <div class="create-actions">
             <button @click.stop="createWorkspace" class="create-btn" :disabled="!newWorkspaceName.trim()">Create</button>
             <button @click.stop="cancelCreating" class="cancel-btn">Cancel</button>
@@ -85,9 +93,24 @@ import axios from 'axios'
 
 const router = useRouter()
 const workspaces = ref([])
+const templates = ref([])
 const isCreating = ref(false)
 const newWorkspaceName = ref('')
+const selectedTemplate = ref('default')
 const nameInput = ref(null)
+
+async function loadTemplates() {
+  try {
+    const response = await axios.get('/api/templates')
+    templates.value = response.data.templates || []
+    if (templates.value.length > 0 && !templates.value.includes(selectedTemplate.value)) {
+      selectedTemplate.value = templates.value[0]
+    }
+  } catch (error) {
+    console.error('Error loading templates:', error)
+    templates.value = []
+  }
+}
 
 async function loadWorkspaces() {
   try {
@@ -112,8 +135,8 @@ function cancelCreating() {
 }
 
 function handleInputBlur(event) {
-  // Don't cancel if clicking on Create/Cancel buttons
-  if (event.relatedTarget?.closest('.create-actions')) {
+  // Don't cancel if clicking on Create/Cancel buttons or template dropdown
+  if (event.relatedTarget?.closest('.create-actions') || event.relatedTarget?.closest('.template-select')) {
     return
   }
   // Small delay to allow button clicks to register
@@ -131,7 +154,8 @@ async function createWorkspace() {
   try {
     const response = await axios.post('/api/workspaces', {
       name,
-      cells: []
+      cells: [],
+      template: selectedTemplate.value
     })
     isCreating.value = false
     newWorkspaceName.value = ''
@@ -179,6 +203,7 @@ function formatRelativeDate(dateStr) {
 
 onMounted(() => {
   loadWorkspaces()
+  loadTemplates()
 })
 </script>
 
@@ -275,6 +300,35 @@ onMounted(() => {
 
 .name-input::placeholder {
   color: var(--text-secondary);
+}
+
+.template-select {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.template-label {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.template-dropdown {
+  flex: 1;
+  padding: 0.5rem;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.template-dropdown:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 
 .create-actions {

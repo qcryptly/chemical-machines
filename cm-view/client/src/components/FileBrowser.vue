@@ -25,6 +25,7 @@
           :key="item.path"
           :item="item"
           :selected-path="selectedPath"
+          :selected-paths="selectedPaths"
           @select="selectItem"
           @open="openFile"
           @delete="deleteItem"
@@ -44,12 +45,25 @@
       :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }"
       @click.stop
     >
-      <template v-if="contextMenu.item">
+      <!-- Bulk actions when multiple items selected -->
+      <template v-if="selectedPaths.size > 1 && contextMenu.item && selectedPaths.has(contextMenu.item.path)">
+        <div class="menu-header">{{ selectedPaths.size }} items selected</div>
+        <div class="menu-divider"></div>
+        <div class="menu-item" @click="handleContextAction('bulkCopy')">Copy to...</div>
+        <div class="menu-item" @click="handleContextAction('bulkMove')">Move to...</div>
+        <div class="menu-divider"></div>
+        <div class="menu-item danger" @click="handleContextAction('bulkDelete')">Delete Selected</div>
+      </template>
+      <!-- Single item actions -->
+      <template v-else-if="contextMenu.item">
         <div v-if="contextMenu.item.type === 'file'" class="menu-item" @click="handleContextAction('open')">Open</div>
         <div class="menu-item" @click="handleContextAction('rename')">Rename</div>
         <div class="menu-divider"></div>
         <div class="menu-item" @click="handleContextAction('newFile')">New File{{ contextMenu.item.type === 'folder' ? ' Here' : '' }}</div>
         <div class="menu-item" @click="handleContextAction('newFolder')">New Folder{{ contextMenu.item.type === 'folder' ? ' Here' : '' }}</div>
+        <div class="menu-divider"></div>
+        <div class="menu-item" @click="handleContextAction('copy')">Copy to...</div>
+        <div class="menu-item" @click="handleContextAction('move')">Move to...</div>
         <div class="menu-divider"></div>
         <div class="menu-item danger" @click="handleContextAction('delete')">Delete</div>
       </template>
@@ -76,6 +90,37 @@
         </div>
       </div>
     </div>
+
+    <!-- Folder Selection Dialog for Move/Copy -->
+    <div v-if="folderDialog.show" class="dialog-overlay" @click.self="cancelFolderDialog">
+      <div class="folder-dialog">
+        <h4>{{ folderDialog.title }}</h4>
+        <div class="folder-list">
+          <div
+            class="folder-option"
+            :class="{ selected: folderDialog.selectedFolder === '' }"
+            @click="folderDialog.selectedFolder = ''"
+          >
+            <span class="folder-icon">📁</span>
+            <span>/ (Root)</span>
+          </div>
+          <template v-for="folder in getAllFolders()" :key="folder.path">
+            <div
+              class="folder-option"
+              :class="{ selected: folderDialog.selectedFolder === folder.path, disabled: isFolderDisabled(folder.path) }"
+              @click="!isFolderDisabled(folder.path) && (folderDialog.selectedFolder = folder.path)"
+            >
+              <span class="folder-icon">📁</span>
+              <span>{{ folder.path }}</span>
+            </div>
+          </template>
+        </div>
+        <div class="dialog-buttons">
+          <button @click="cancelFolderDialog" class="cancel-btn">Cancel</button>
+          <button @click="confirmFolderDialog" class="confirm-btn">{{ folderDialog.confirmText }}</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -94,6 +139,8 @@ const files = ref([])
 const loading = ref(true)
 const error = ref(null)
 const selectedPath = ref(null)
+const selectedPaths = ref(new Set())  // Multi-selection support
+const lastSelectedPath = ref(null)    // For shift-select range
 const inputRef = ref(null)
 const isDragOverRoot = ref(false)
 
@@ -112,6 +159,15 @@ const inputDialog = ref({
   confirmText: 'Create',
   action: null,
   parentPath: ''
+})
+
+const folderDialog = ref({
+  show: false,
+  title: '',
+  confirmText: 'Move',
+  action: null,  // 'move', 'copy', 'bulkMove', 'bulkCopy'
+  items: [],     // items to move/copy
+  selectedFolder: ''
 })
 
 // Helper to build workspace file API URL
@@ -139,9 +195,77 @@ watch(() => props.workspaceId, () => {
   refresh()
 })
 
-function selectItem(item) {
+// Flatten the file tree for shift-select range calculation
+function flattenTree(items, result = []) {
+  for (const item of items) {
+    result.push(item)
+    if (item.type === 'folder' && item.children) {
+      flattenTree(item.children, result)
+    }
+  }
+  return result
+}
+
+// Get all items between two paths (inclusive)
+function getItemsInRange(startPath, endPath) {
+  const flatList = flattenTree(files.value)
+  const startIndex = flatList.findIndex(item => item.path === startPath)
+  const endIndex = flatList.findIndex(item => item.path === endPath)
+
+  if (startIndex === -1 || endIndex === -1) return []
+
+  const minIndex = Math.min(startIndex, endIndex)
+  const maxIndex = Math.max(startIndex, endIndex)
+
+  return flatList.slice(minIndex, maxIndex + 1)
+}
+
+function selectItem(item, event = {}) {
+  const { shiftKey = false, ctrlKey = false, metaKey = false } = event
+  const modifierKey = ctrlKey || metaKey
+
+  if (shiftKey && lastSelectedPath.value) {
+    // Shift-click: select range from last selected to current
+    const rangeItems = getItemsInRange(lastSelectedPath.value, item.path)
+    if (!modifierKey) {
+      selectedPaths.value.clear()
+    }
+    for (const rangeItem of rangeItems) {
+      selectedPaths.value.add(rangeItem.path)
+    }
+    selectedPaths.value = new Set(selectedPaths.value) // Trigger reactivity
+  } else if (modifierKey) {
+    // Ctrl/Cmd-click: toggle selection
+    if (selectedPaths.value.has(item.path)) {
+      selectedPaths.value.delete(item.path)
+    } else {
+      selectedPaths.value.add(item.path)
+    }
+    selectedPaths.value = new Set(selectedPaths.value) // Trigger reactivity
+    lastSelectedPath.value = item.path
+  } else {
+    // Regular click: single select
+    selectedPaths.value.clear()
+    selectedPaths.value.add(item.path)
+    selectedPaths.value = new Set(selectedPaths.value) // Trigger reactivity
+    lastSelectedPath.value = item.path
+  }
+
   selectedPath.value = item.path
   emit('file-select', item)
+}
+
+function clearSelection() {
+  selectedPaths.value.clear()
+  selectedPaths.value = new Set(selectedPaths.value)
+  selectedPath.value = null
+  lastSelectedPath.value = null
+}
+
+// Get selected items as array
+function getSelectedItems() {
+  const flatList = flattenTree(files.value)
+  return flatList.filter(item => selectedPaths.value.has(item.path))
 }
 
 function openFile(item) {
@@ -243,6 +367,95 @@ function cancelInput() {
   inputDialog.value.show = false
 }
 
+// Get all folders for folder selection dialog
+function getAllFolders(items = files.value, result = []) {
+  for (const item of items) {
+    if (item.type === 'folder') {
+      result.push(item)
+      if (item.children) {
+        getAllFolders(item.children, result)
+      }
+    }
+  }
+  return result
+}
+
+// Check if a folder should be disabled (can't move/copy into itself or children)
+function isFolderDisabled(folderPath) {
+  return folderDialog.value.items.some(item =>
+    item.path === folderPath || folderPath.startsWith(item.path + '/')
+  )
+}
+
+function showFolderDialog(title, confirmText, action, items) {
+  folderDialog.value = {
+    show: true,
+    title,
+    confirmText,
+    action,
+    items,
+    selectedFolder: ''
+  }
+}
+
+function cancelFolderDialog() {
+  folderDialog.value.show = false
+}
+
+async function confirmFolderDialog() {
+  const { action, items, selectedFolder } = folderDialog.value
+
+  try {
+    if (action === 'move' || action === 'bulkMove') {
+      // Move items
+      for (const item of items) {
+        const newPath = selectedFolder ? `${selectedFolder}/${item.name}` : item.name
+        if (item.path !== newPath) {
+          await axios.put(fileApiUrl(item.path), { newPath })
+        }
+      }
+    } else if (action === 'copy' || action === 'bulkCopy') {
+      // Copy items
+      for (const item of items) {
+        const targetPath = selectedFolder ? `${selectedFolder}/${item.name}` : item.name
+        await axios.post(`/api/workspaces/${props.workspaceId}/files/copy`, {
+          sourcePath: item.path,
+          targetPath
+        })
+      }
+    }
+
+    await refresh()
+    clearSelection()
+  } catch (err) {
+    alert(`Error: ${err.response?.data?.error || err.message}`)
+  }
+
+  cancelFolderDialog()
+}
+
+async function bulkDeleteItems() {
+  const items = getSelectedItems()
+  if (items.length === 0) return
+
+  const itemNames = items.map(i => i.name).join(', ')
+  if (!confirm(`Delete ${items.length} item(s)?\n\n${itemNames}`)) {
+    return
+  }
+
+  try {
+    // Delete in reverse order to handle nested items properly
+    const sortedItems = [...items].sort((a, b) => b.path.length - a.path.length)
+    for (const item of sortedItems) {
+      await axios.delete(fileApiUrl(item.path))
+    }
+    await refresh()
+    clearSelection()
+  } catch (err) {
+    alert(`Error deleting: ${err.response?.data?.error || err.message}`)
+  }
+}
+
 function handleContextAction(action) {
   const item = contextMenu.value.item
   contextMenu.value.show = false
@@ -262,6 +475,21 @@ function handleContextAction(action) {
       break
     case 'delete':
       if (item) deleteItem(item)
+      break
+    case 'copy':
+      if (item) showFolderDialog('Copy to', 'Copy', 'copy', [item])
+      break
+    case 'move':
+      if (item) showFolderDialog('Move to', 'Move', 'move', [item])
+      break
+    case 'bulkDelete':
+      bulkDeleteItems()
+      break
+    case 'bulkCopy':
+      showFolderDialog('Copy items to', 'Copy', 'bulkCopy', getSelectedItems())
+      break
+    case 'bulkMove':
+      showFolderDialog('Move items to', 'Move', 'bulkMove', getSelectedItems())
       break
   }
 }
@@ -545,5 +773,65 @@ defineExpose({ refresh })
 
 .confirm-btn:hover {
   opacity: 0.9;
+}
+
+.menu-header {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.folder-dialog {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1rem;
+  width: 320px;
+  max-height: 400px;
+  display: flex;
+  flex-direction: column;
+}
+
+.folder-dialog h4 {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+}
+
+.folder-list {
+  flex: 1;
+  overflow-y: auto;
+  max-height: 250px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  margin-bottom: 0.75rem;
+}
+
+.folder-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8rem;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.folder-option:hover:not(.disabled) {
+  background: var(--bg-primary);
+}
+
+.folder-option.selected {
+  background: rgba(0, 212, 255, 0.15);
+}
+
+.folder-option.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.folder-icon {
+  font-size: 0.85rem;
 }
 </style>

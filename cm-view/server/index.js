@@ -10,6 +10,8 @@ const axios = require('axios');
 
 // Workspace directory for user files
 const WORKSPACE_DIR = process.env.WORKSPACE_DIR || path.join(__dirname, '../../workspace');
+// Workspace templates directory
+const TEMPLATES_DIR = process.env.TEMPLATES_DIR || path.join(__dirname, '../../workspaces');
 
 const PORT = process.env.PORT || 3000;
 const COMPUTE_URL = process.env.COMPUTE_URL || 'http://0.0.0.0:3001';
@@ -145,9 +147,31 @@ app.get('/api/workspaces/:id', async (req, res) => {
   }
 });
 
+// List available workspace templates
+app.get('/api/templates', async (req, res) => {
+  try {
+    const entries = await fs.readdir(TEMPLATES_DIR, { withFileTypes: true });
+    const templates = entries
+      .filter(entry => entry.isDirectory())
+      .map(entry => entry.name)
+      .sort((a, b) => {
+        // 'default' always comes first
+        if (a === 'default') return -1;
+        if (b === 'default') return 1;
+        return a.localeCompare(b);
+      });
+
+    res.json({ templates });
+  } catch (error) {
+    console.error('Error listing templates:', error);
+    // Return empty list if templates dir doesn't exist
+    res.json({ templates: [] });
+  }
+});
+
 // Create workspace
 app.post('/api/workspaces', async (req, res) => {
-  const { name, cells } = req.body;
+  const { name, cells, template = 'default' } = req.body;
 
   try {
     const result = await pgPool.query(
@@ -157,8 +181,8 @@ app.post('/api/workspaces', async (req, res) => {
 
     const workspace = result.rows[0];
 
-    // Create workspace directory with example files
-    await createExampleFiles(workspace.id);
+    // Copy template files to workspace directory
+    await copyTemplateToWorkspace(workspace.id, template);
 
     res.json(workspace);
   } catch (error) {
@@ -283,180 +307,6 @@ app.put('/api/notebooks/:id', async (req, res) => {
 
 // ================== File Browser API ==================
 
-// Example files for new workspaces
-const EXAMPLE_FILES = {
-  'file.hpp': `#pragma once
-
-// Example header file
-// This can be included by both example.cpp and example.cell.cpp
-
-#include <string>
-#include <vector>
-
-namespace example {
-
-inline std::string greet(const std::string& name) {
-    return "Hello, " + name + "!";
-}
-
-inline std::vector<int> range(int n) {
-    std::vector<int> result;
-    for (int i = 0; i < n; ++i) {
-        result.push_back(i);
-    }
-    return result;
-}
-
-} // namespace example
-`,
-
-  'example.cpp': `// Single-file C++ example
-// This file is executed as a single unit (no cells)
-// It includes file.hpp from the same directory
-
-#include <iostream>
-#include "file.hpp"
-
-int main() {
-    // Use the greet function from our header
-    std::cout << example::greet("World") << std::endl;
-
-    // Use the range function
-    auto numbers = example::range(5);
-    std::cout << "Numbers: ";
-    for (int n : numbers) {
-        std::cout << n << " ";
-    }
-    std::cout << std::endl;
-
-    return 0;
-}
-`,
-
-  'example.cell.cpp': `// %% Cell 1 - Include and Setup
-// Cell-based C++ example
-// Each cell is compiled and executed independently
-
-#include <iostream>
-#include "file.hpp"
-
-int main() {
-    std::cout << example::greet("Cell 1") << std::endl;
-    return 0;
-}
-
-// %% Cell 2 - Using Range
-#include <iostream>
-#include "file.hpp"
-
-int main() {
-    auto nums = example::range(10);
-    int sum = 0;
-    for (int n : nums) sum += n;
-    std::cout << "Sum of 0-9: " << sum << std::endl;
-    return 0;
-}
-`,
-
-  'utils.py': `"""
-Example Python module
-This can be imported by other Python files in the workspace
-"""
-
-def greet(name: str) -> str:
-    """Return a greeting message"""
-    return f"Hello, {name}!"
-
-def factorial(n: int) -> int:
-    """Calculate factorial recursively"""
-    if n <= 1:
-        return 1
-    return n * factorial(n - 1)
-
-def fibonacci(n: int) -> list[int]:
-    """Generate first n Fibonacci numbers"""
-    if n <= 0:
-        return []
-    if n == 1:
-        return [0]
-
-    fibs = [0, 1]
-    for _ in range(2, n):
-        fibs.append(fibs[-1] + fibs[-2])
-    return fibs
-
-class Counter:
-    """Simple counter class"""
-    def __init__(self, start: int = 0):
-        self.value = start
-
-    def increment(self, by: int = 1) -> int:
-        self.value += by
-        return self.value
-
-    def decrement(self, by: int = 1) -> int:
-        self.value -= by
-        return self.value
-`,
-
-  'example.py': `# Single-file Python example
-# This file is executed as a single unit (no cells)
-# It imports utils.py from the same directory
-
-from utils import greet, factorial, fibonacci, Counter
-
-# Use the greet function
-print(greet("World"))
-
-# Calculate some factorials
-for i in range(1, 6):
-    print(f"{i}! = {factorial(i)}")
-
-# Generate Fibonacci sequence
-fibs = fibonacci(10)
-print(f"First 10 Fibonacci numbers: {fibs}")
-
-# Use the Counter class
-counter = Counter(10)
-print(f"Counter starts at: {counter.value}")
-counter.increment(5)
-print(f"After +5: {counter.value}")
-counter.decrement(3)
-print(f"After -3: {counter.value}")
-`,
-
-  'example.cell.py': `# %% Cell 1 - Basic Import
-# Cell-based Python example
-# Each cell can be run independently
-
-from utils import greet
-
-print(greet("Cell 1"))
-print("This is the first cell")
-
-# %% Cell 2 - Math Functions
-from utils import factorial, fibonacci
-
-# Calculate factorials
-for n in [5, 7, 10]:
-    print(f"{n}! = {factorial(n)}")
-
-# Show Fibonacci sequence
-print(f"Fibonacci(15): {fibonacci(15)}")
-
-# %% Cell 3 - Using Classes
-from utils import Counter
-
-# Create and use a counter
-c = Counter(100)
-print(f"Start: {c.value}")
-
-for i in range(5):
-    c.increment(i * 2)
-    print(f"After +{i*2}: {c.value}")
-`
-};
-
 // Ensure workspace directory exists for a specific workspace
 async function ensureWorkspaceDir(workspaceId = null) {
   const dir = workspaceId ? path.join(WORKSPACE_DIR, String(workspaceId)) : WORKSPACE_DIR;
@@ -468,26 +318,52 @@ async function ensureWorkspaceDir(workspaceId = null) {
   return dir;
 }
 
-// Create example files for a new workspace
-async function createExampleFiles(workspaceId) {
+// Copy template directory to a new workspace
+async function copyTemplateToWorkspace(workspaceId, templateName = 'default') {
   const workspaceDir = await ensureWorkspaceDir(workspaceId);
+  const templateDir = path.join(TEMPLATES_DIR, templateName);
 
-  for (const [filename, content] of Object.entries(EXAMPLE_FILES)) {
-    const filePath = path.join(workspaceDir, filename);
-    try {
-      // Only create if doesn't exist
-      await fs.access(filePath);
-    } catch {
-      await fs.writeFile(filePath, content, 'utf-8');
-    }
-  }
-
-  // Create __init__.py for Python package imports
-  const initPath = path.join(workspaceDir, '__init__.py');
   try {
-    await fs.access(initPath);
-  } catch {
+    // Check if template exists
+    await fs.access(templateDir);
+
+    // Recursively copy template to workspace
+    await copyDirRecursive(templateDir, workspaceDir);
+  } catch (error) {
+    // If template doesn't exist, try 'default', or create empty workspace
+    if (templateName !== 'default') {
+      console.warn(`Template '${templateName}' not found, falling back to 'default'`);
+      const defaultDir = path.join(TEMPLATES_DIR, 'default');
+      try {
+        await fs.access(defaultDir);
+        await copyDirRecursive(defaultDir, workspaceDir);
+        return;
+      } catch {
+        // Default doesn't exist either
+      }
+    }
+
+    // Create minimal workspace with just __init__.py
+    console.warn('No templates found, creating empty workspace');
+    const initPath = path.join(workspaceDir, '__init__.py');
     await fs.writeFile(initPath, '# Workspace package - auto-generated\n', 'utf-8');
+  }
+}
+
+// Recursively copy a directory
+async function copyDirRecursive(src, dest) {
+  await fs.mkdir(dest, { recursive: true });
+  const entries = await fs.readdir(src, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+
+    if (entry.isDirectory()) {
+      await copyDirRecursive(srcPath, destPath);
+    } else {
+      await fs.copyFile(srcPath, destPath);
+    }
   }
 }
 
@@ -656,6 +532,69 @@ app.put('/api/workspaces/:workspaceId/files/:path(*)', async (req, res) => {
   }
 });
 
+// Copy file or folder in a workspace
+app.post('/api/workspaces/:workspaceId/files/copy', async (req, res) => {
+  const { sourcePath, targetPath } = req.body;
+
+  if (!sourcePath || !targetPath) {
+    return res.status(400).json({ error: 'Source and target paths required' });
+  }
+
+  try {
+    const fullSourcePath = validateWorkspacePath(req.params.workspaceId, sourcePath);
+    const fullTargetPath = validateWorkspacePath(req.params.workspaceId, targetPath);
+
+    // Check if source exists
+    const stats = await fs.stat(fullSourcePath);
+
+    // Check if target already exists
+    try {
+      await fs.access(fullTargetPath);
+      return res.status(409).json({ error: 'Target already exists' });
+    } catch {
+      // Target doesn't exist, proceed
+    }
+
+    // Ensure parent directory exists
+    const parentDir = path.dirname(fullTargetPath);
+    await fs.mkdir(parentDir, { recursive: true });
+
+    if (stats.isDirectory()) {
+      // Recursively copy directory
+      await copyDir(fullSourcePath, fullTargetPath);
+    } else {
+      // Copy file
+      await fs.copyFile(fullSourcePath, fullTargetPath);
+    }
+
+    res.json({ success: true, path: targetPath });
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      res.status(404).json({ error: 'Source not found' });
+    } else {
+      console.error('Error copying:', error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+});
+
+// Helper function to recursively copy a directory
+async function copyDir(src, dest) {
+  await fs.mkdir(dest, { recursive: true });
+  const entries = await fs.readdir(src, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+
+    if (entry.isDirectory()) {
+      await copyDir(srcPath, destPath);
+    } else {
+      await fs.copyFile(srcPath, destPath);
+    }
+  }
+}
+
 // Delete file or folder in a workspace
 app.delete('/api/workspaces/:workspaceId/files/:path(*)', async (req, res) => {
   try {
@@ -676,6 +615,64 @@ app.delete('/api/workspaces/:workspaceId/files/:path(*)', async (req, res) => {
       console.error('Error deleting file:', error);
       res.status(500).json({ error: error.message });
     }
+  }
+});
+
+// Get HTML output for a file from .out/ directory
+// For .cell.py or .cell.cpp files, returns array of cell outputs (split by delimiter)
+// For regular .py or .cpp files, returns single output
+app.get('/api/workspaces/:workspaceId/output/:path(*)', async (req, res) => {
+  try {
+    const workspaceDir = getWorkspaceDir(req.params.workspaceId);
+    const requestedPath = req.params.path;
+
+    // Determine the HTML output path
+    // For myfile.cell.py -> .out/myfile.cell.py.html
+    // For myfile.py -> .out/myfile.py.html
+    const htmlFileName = requestedPath + '.html';
+    const outputPath = path.join(workspaceDir, '.out', htmlFileName);
+
+    // Validate path to prevent directory traversal
+    const resolvedPath = path.resolve(outputPath);
+    const resolvedWorkspace = path.resolve(workspaceDir);
+    if (!resolvedPath.startsWith(resolvedWorkspace)) {
+      return res.status(403).json({ error: 'Invalid path' });
+    }
+
+    // Check if output file exists
+    try {
+      await fs.access(outputPath);
+    } catch {
+      return res.json({ exists: false, outputs: [] });
+    }
+
+    const htmlContent = await fs.readFile(outputPath, 'utf-8');
+
+    // Check if this is a cell-based file (.cell.py or .cell.cpp)
+    const isCellFile = /\.cell\.(py|cpp)$/i.test(requestedPath);
+
+    if (isCellFile) {
+      // Split HTML by cell delimiter comments
+      // Expected format: <!-- CELL_DELIMITER --> or similar marker
+      const cellDelimiter = /<!--\s*CELL[_-]?DELIMITER\s*-->/gi;
+      const cellOutputs = htmlContent.split(cellDelimiter).map(s => s.trim()).filter(s => s.length > 0);
+
+      res.json({
+        exists: true,
+        isCellFile: true,
+        outputs: cellOutputs
+      });
+    } else {
+      // Single file, return as single output
+      res.json({
+        exists: true,
+        isCellFile: false,
+        outputs: [htmlContent.trim()]
+      });
+    }
+  } catch (error) {
+    console.error('Error reading output file:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 

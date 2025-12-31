@@ -120,12 +120,13 @@ async function ensureDatabase() {
  * @param {string} params.compiler - Compiler to use (g++, clang++)
  * @param {string} params.cppStandard - C++ standard (c++11, c++14, c++17, c++20, c++23)
  * @param {string[]} params.extraFlags - Additional compiler flags
+ * @param {Object} params.cellInfo - Cell output information { filePath, cellIndex, isCellFile }
  * @param {Object} context - Execution context { jobId, emit }
  * @returns {Promise<Object>} Execution result
  */
 async function executeCpp(params, context) {
   const { emit, jobId } = context;
-  const { code, sourceDir = '', cppEnvironment, vendorEnvironment, compiler = 'clang++', cppStandard = 'c++23', extraFlags = [] } = params;
+  const { code, sourceDir = '', cppEnvironment, vendorEnvironment, compiler = 'clang++', cppStandard = 'c++23', extraFlags = [], cellInfo } = params;
 
   if (!code || code.trim().length === 0) {
     throw new Error('No code provided');
@@ -162,6 +163,22 @@ async function executeCpp(params, context) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cpp-'));
   const sourceFile = path.join(tmpDir, 'main.cpp');
   const outputFile = path.join(tmpDir, 'main');
+
+  // Build cell output environment variables
+  const sourceFullDir = sourceDir ? path.join(WORKSPACE_DIR, sourceDir) : WORKSPACE_DIR;
+  const cellEnv = {};
+  if (cellInfo) {
+    const { filePath, cellIndex, isCellFile } = cellInfo;
+    // Output file path: .out/filename.html in the workspace
+    const outputHtmlFile = filePath
+      ? path.join(sourceFullDir, '.out', `${filePath}.html`)
+      : '';
+
+    cellEnv.CM_OUTPUT_FILE = outputHtmlFile;
+    cellEnv.CM_CELL_INDEX = String(cellIndex ?? -1);
+    cellEnv.CM_IS_CELL_FILE = isCellFile ? 'true' : 'false';
+    cellEnv.CM_WORKSPACE_DIR = sourceFullDir;
+  }
 
   try {
     // Write source code to file
@@ -207,6 +224,10 @@ async function executeCpp(params, context) {
     // Generate compile command
     const { compiler: finalCompiler, args } = generateCompileCommand(sourceFile, outputFile, analysis);
 
+    // Add cm-libraries include path for cm_output.hpp
+    const cmLibrariesCppPath = path.join(__dirname, '../../../../cm-libraries/cpp');
+    args.unshift(`-I${cmLibrariesCppPath}`);
+
     // Add extra flags
     if (extraFlags.length > 0) {
       args.push(...extraFlags);
@@ -233,8 +254,8 @@ async function executeCpp(params, context) {
     emit('stdout', 'Running program...\n');
     emit('stdout', '─'.repeat(40) + '\n\n');
 
-    // Execute
-    const execResult = await runProcess(outputFile, [], emit, tmpDir);
+    // Execute with cell environment variables
+    const execResult = await runProcess(outputFile, [], emit, tmpDir, cellEnv);
 
     emit('stdout', '\n' + '─'.repeat(40) + '\n');
     emit('stdout', `Program exited with code ${execResult.exitCode}\n`);
@@ -263,8 +284,13 @@ async function executeCpp(params, context) {
 
 /**
  * Run a process and stream output
+ * @param {string} command - Command to run
+ * @param {string[]} args - Command arguments
+ * @param {Function} emit - Emit function for stdout/stderr
+ * @param {string} cwd - Working directory
+ * @param {Object} extraEnv - Extra environment variables
  */
-function runProcess(command, args, emit, cwd) {
+function runProcess(command, args, emit, cwd, extraEnv = {}) {
   return new Promise((resolve) => {
     let stdout = '';
     let stderr = '';
@@ -273,6 +299,7 @@ function runProcess(command, args, emit, cwd) {
       cwd,
       env: {
         ...process.env,
+        ...extraEnv,
         // Add CUDA paths if available
         PATH: `${process.env.PATH}:/usr/local/cuda/bin`,
         LD_LIBRARY_PATH: `${process.env.LD_LIBRARY_PATH || ''}:/usr/local/cuda/lib64:/opt/vendor/lib`

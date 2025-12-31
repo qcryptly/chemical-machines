@@ -21,14 +21,22 @@
         ▶ Running...
       </div>
     </div>
+
+    <!-- HTML Output Panel -->
+    <OutputPanel
+      v-if="htmlOutput && showHtmlOutput"
+      :html-content="htmlOutput"
+      @close="showHtmlOutput = false"
+    />
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from '@codemirror/view'
+import OutputPanel from './OutputPanel.vue'
 import { EditorState } from '@codemirror/state'
-import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
+import { defaultKeymap, history, historyKeymap, indentWithTab, insertNewlineAndIndent } from '@codemirror/commands'
 import { syntaxHighlighting, HighlightStyle, bracketMatching, foldGutter } from '@codemirror/language'
 import { autocompletion, completionKeymap, completeFromList } from '@codemirror/autocomplete'
 import { python } from '@codemirror/lang-python'
@@ -302,13 +310,15 @@ const customHighlightStyle = HighlightStyle.define([
 const props = defineProps({
   cell: { type: Object, required: true },
   index: { type: Number, required: true },
-  language: { type: String, default: 'python' }
+  language: { type: String, default: 'python' },
+  htmlOutput: { type: String, default: '' }
 })
 
 const emit = defineEmits(['update', 'run', 'delete', 'blur'])
 
 const editorContainer = ref(null)
 const isFocused = ref(false)
+const showHtmlOutput = ref(true)
 let editorView = null
 
 const languageExtensions = {
@@ -343,18 +353,26 @@ function createEditor() {
       maxRenderedOptions: 20,
     }),
     keymap.of([
-      ...defaultKeymap,
-      ...historyKeymap,
-      ...completionKeymap,
-      indentWithTab,
       {
-        key: 'Ctrl-Enter',
+        key: 'Mod-Enter',
         run: () => {
           emit('run')
           return true
-        }
-      }
+        },
+        preventDefault: true
+      },
+      // Explicit Enter key handling to prevent autocomplete from interfering
+      {
+        key: 'Enter',
+        run: insertNewlineAndIndent,
+      },
+      ...defaultKeymap,
+      ...historyKeymap,
+      indentWithTab,
     ]),
+    // Completion keymap separate so it doesn't override Enter behavior
+    keymap.of(completionKeymap),
+
     EditorView.updateListener.of((update) => {
       if (update.docChanged) {
         const content = update.state.doc.toString()
@@ -374,7 +392,8 @@ function createEditor() {
       },
       '.cm-content': {
         fontFamily: "'Monaco', 'Menlo', 'Consolas', monospace",
-        padding: '8px 0'
+        padding: '8px 0',
+        caretColor: '#ffedcb'
       },
       '.cm-gutters': {
         backgroundColor: '#12121a',
@@ -387,7 +406,11 @@ function createEditor() {
       '.cm-scroller': {
         minHeight: '80px'
       },
+      '.cm-cursor, .cm-cursor-primary': {
+        borderLeftColor: 'white'
+      },
       // Autocomplete tooltip styling
+
       '.cm-tooltip': {
         backgroundColor: '#1e1e2e',
         border: '1px solid #3a3a4a',
@@ -477,6 +500,13 @@ watch(() => props.language, () => {
     editorView.dispatch({
       changes: { from: 0, to: editorView.state.doc.length, insert: content }
     })
+  }
+})
+
+// Show output panel when new HTML output arrives
+watch(() => props.htmlOutput, (newOutput) => {
+  if (newOutput) {
+    showHtmlOutput.value = true
   }
 })
 

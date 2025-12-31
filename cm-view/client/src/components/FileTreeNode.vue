@@ -3,7 +3,7 @@
     <div
       class="node-row"
       :class="{
-        selected: selectedPath === item.path,
+        selected: selectedPaths.has(item.path),
         folder: item.type === 'folder',
         'drag-over': isDragOver && item.type === 'folder'
       }"
@@ -36,7 +36,8 @@
         :key="child.path"
         :item="child"
         :selected-path="selectedPath"
-        @select="$emit('select', $event)"
+        :selected-paths="selectedPaths"
+        @select="(item, event) => $emit('select', item, event)"
         @open="$emit('open', $event)"
         @delete="$emit('delete', $event)"
         @rename="$emit('rename', $event)"
@@ -54,7 +55,8 @@ import { ref } from 'vue'
 
 const props = defineProps({
   item: { type: Object, required: true },
-  selectedPath: { type: String, default: null }
+  selectedPath: { type: String, default: null },
+  selectedPaths: { type: Set, default: () => new Set() }
 })
 
 const emit = defineEmits(['select', 'open', 'delete', 'rename', 'create-file', 'create-folder', 'context-menu', 'move'])
@@ -92,12 +94,16 @@ function toggleExpand() {
   expanded.value = !expanded.value
 }
 
-function handleClick() {
-  emit('select', props.item)
-  if (props.item.type === 'folder') {
+function handleClick(event) {
+  emit('select', props.item, {
+    shiftKey: event.shiftKey,
+    ctrlKey: event.ctrlKey,
+    metaKey: event.metaKey
+  })
+  if (props.item.type === 'folder' && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
     expanded.value = !expanded.value
-  } else {
-    // Open files on single click
+  } else if (props.item.type === 'file' && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
+    // Open files on single click only when not multi-selecting
     emit('open', props.item)
   }
 }

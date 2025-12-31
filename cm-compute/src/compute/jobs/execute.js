@@ -28,13 +28,13 @@ function ensureWorkspacePackage() {
 
 /**
  * Execute Python code directly
- * @param {Object} params - Job parameters { code, environment, sourceDir }
+ * @param {Object} params - Job parameters { code, environment, sourceDir, cellInfo }
  * @param {Object} context - Execution context { pythonPath, jobId, emit }
  * @returns {Promise<Object>} Execution results
  */
 async function execute(params, context) {
   const { pythonPath, jobId, emit } = context;
-  const { code, sourceDir = '' } = params;
+  const { code, sourceDir = '', cellInfo } = params;
 
   if (!code) {
     throw new Error('No code provided');
@@ -47,10 +47,13 @@ async function execute(params, context) {
   // 1. Parent of workspace (so `import workspace` works)
   // 2. The workspace itself (so `import module` works for files in workspace root)
   // 3. The source file's directory (so relative imports work)
+  // 4. cm-libraries for cm_output module
   const workspaceParent = path.dirname(WORKSPACE_DIR);
   const sourceFullDir = sourceDir ? path.join(WORKSPACE_DIR, sourceDir) : WORKSPACE_DIR;
+  const cmLibrariesPath = path.join(__dirname, '../../../../cm-libraries/python');
 
   const pythonPathParts = [
+    cmLibrariesPath,  // For cm_output module
     workspaceParent,  // For `from workspace import module`
     WORKSPACE_DIR,    // For direct `import module` from workspace root
     sourceFullDir     // For relative imports from current file's directory
@@ -59,11 +62,27 @@ async function execute(params, context) {
   const existingPythonPath = process.env.PYTHONPATH || '';
   const newPythonPath = [...pythonPathParts, existingPythonPath].filter(Boolean).join(':');
 
+  // Build cell output environment variables
+  const cellEnv = {};
+  if (cellInfo) {
+    const { filePath, cellIndex, isCellFile } = cellInfo;
+    // Output file path: .out/filename.html in the workspace
+    const outputFile = filePath
+      ? path.join(sourceFullDir, '.out', `${filePath}.html`)
+      : '';
+
+    cellEnv.CM_OUTPUT_FILE = outputFile;
+    cellEnv.CM_CELL_INDEX = String(cellIndex ?? -1);
+    cellEnv.CM_IS_CELL_FILE = isCellFile ? 'true' : 'false';
+    cellEnv.CM_WORKSPACE_DIR = sourceFullDir;
+  }
+
   return new Promise((resolve, reject) => {
     const python = spawn(pythonPath, ['-c', code], {
       cwd: sourceFullDir,  // Run from the source file's directory
       env: {
         ...process.env,
+        ...cellEnv,
         PYTHONUNBUFFERED: '1',
         PYTHONPATH: newPythonPath
       }

@@ -193,30 +193,18 @@
 
     <!-- Main Content -->
     <div class="main-content">
-      <!-- Top Panel: Visualization -->
-      <div class="visualizer-panel" :style="{ height: visualizerHeight + 'px' }">
-        <div class="viewport" ref="viewport"></div>
-
-        <div class="viz-overlay">
-          <div class="viz-controls">
-            <button @click="resetCamera" title="Reset camera">Reset</button>
-            <button @click="clearScene" title="Clear scene">Clear</button>
-            <button @click="toggleBoxVisible" title="Toggle unit box">
-              {{ boxVisible ? 'Hide Box' : 'Show Box' }}
-            </button>
-          </div>
-          <div class="molecule-info" v-if="currentMolecule">
-            <span class="molecule-name">{{ currentMolecule.name }}</span>
-            <span class="molecule-formula">{{ currentMolecule.formula }}</span>
-          </div>
-          <div class="box-info">
-            <span>Unit Box: {{ boxSize.toFixed(1) }} nm</span>
-          </div>
-        </div>
+      <!-- Top Panel: WebGL Visualization -->
+      <div class="visualizer-panel" :style="visualizerPanelStyle">
+        <MainWebGLPanel
+          :html-content="webglContent"
+          :height="visualizerHeight"
+          @refresh="refreshWebGL"
+          @update:expanded="webglExpanded = $event"
+        />
       </div>
 
-      <!-- Resize Handle (Horizontal) -->
-      <div class="resize-handle-h" @mousedown="startResize"></div>
+      <!-- Resize Handle (Horizontal) - hidden when WebGL is collapsed -->
+      <div v-if="webglExpanded" class="resize-handle-h" @pointerdown="startResize"></div>
 
       <!-- Bottom Panel: Code Cells / Terminal -->
       <div class="notebook-panel">
@@ -328,21 +316,36 @@
               <option value="c++20">C++20</option>
               <option value="c++23">C++23</option>
             </select>
+            <!-- Markdown preview toggle -->
+            <button
+              v-if="isMarkdownFile"
+              @click="markdownPreviewMode = !markdownPreviewMode"
+              class="preview-btn"
+              :class="{ active: markdownPreviewMode }"
+              :title="markdownPreviewMode ? 'Edit markdown' : 'Preview markdown'"
+            >
+              {{ markdownPreviewMode ? '✏️ Edit' : '👁️ Preview' }}
+            </button>
             <button v-if="currentFile" @click="saveFile" class="save-btn" :disabled="!hasUnsavedChanges" title="Save file (Ctrl+S)">
               Save
             </button>
-            <button v-if="currentFile && currentUseCells" @click="addCell" title="Add new cell">+ Cell</button>
+            <button v-if="currentFile && currentUseCells && !isMarkdownFile" @click="addCell" title="Add new cell">+ Cell</button>
             <button v-if="currentFile" @click="closeFile" class="close-btn" title="Close file">×</button>
           </div>
         </div>
 
-        <div class="cells" v-if="currentFile && cells.length > 0">
+        <!-- Markdown Preview -->
+        <div class="markdown-preview" v-if="isMarkdownFile && markdownPreviewMode" v-html="renderedMarkdown"></div>
+
+        <!-- Code Cells (hidden when markdown preview is active) -->
+        <div class="cells" v-else-if="currentFile && cells.length > 0">
           <CodeCell
             v-for="(cell, index) in cells"
             :key="cell.id"
             :cell="cell"
             :index="index"
             :language="currentFile.language"
+            :html-output="htmlOutputs[index] || ''"
             @update="updateCell(index, $event)"
             @run="executeCell(index)"
             @delete="deleteCell(index)"
@@ -467,8 +470,6 @@
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
-import * as THREE from 'three'
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
 import CodeCell from '../components/CodeCell.vue'
 import FileBrowser from '../components/FileBrowser.vue'
 import CppEnvironmentDialog from '../components/CppEnvironmentDialog.vue'
@@ -476,9 +477,10 @@ import VendorEnvironmentDialog from '../components/VendorEnvironmentDialog.vue'
 import EnvironmentDetailDialog from '../components/EnvironmentDetailDialog.vue'
 import ProfileDialog from '../components/ProfileDialog.vue'
 import Terminal from '../components/Terminal.vue'
+import MainWebGLPanel from '../components/MainWebGLPanel.vue'
+import { marked } from 'marked'
 
 const route = useRoute()
-const viewport = ref(null)
 
 // Workspace ID from route
 const workspaceId = computed(() => route.params.id)
@@ -489,6 +491,34 @@ function fileApiUrl(filePath = '') {
   return filePath ? `${base}/${encodeURIComponent(filePath)}` : base
 }
 
+// Helper to build output API URL
+function outputApiUrl(filePath) {
+  return `/api/workspaces/${workspaceId.value}/output/${encodeURIComponent(filePath)}`
+}
+
+// Fetch HTML outputs for a file from .out/ directory
+async function fetchHtmlOutputs(filePath) {
+  try {
+    const response = await axios.get(outputApiUrl(filePath))
+    if (response.data.exists) {
+      return response.data.outputs || []
+    }
+    return []
+  } catch (error) {
+    console.error('Error fetching HTML outputs:', error)
+    return []
+  }
+}
+
+// Refresh HTML outputs for the current tab
+async function refreshHtmlOutputs() {
+  if (activeTabIndex.value >= 0 && activeTabIndex.value < openTabs.value.length) {
+    const tab = openTabs.value[activeTabIndex.value]
+    const outputs = await fetchHtmlOutputs(tab.path)
+    tab.htmlOutputs = outputs
+  }
+}
+
 // Sidebar state
 const sidebarOpen = ref(true)
 const sidebarTab = ref('files')
@@ -497,6 +527,29 @@ const sidebarTab = ref('files')
 const bottomPanelMode = ref('editor')
 const terminalRef = ref(null)
 const fileBrowserRef = ref(null)
+
+// WebGL main view state
+const webglContent = ref('')
+
+// Fetch WebGL content from .out/main.webgl.html
+async function fetchWebGLContent() {
+  try {
+    const response = await axios.get(outputApiUrl('main.webgl'))
+    if (response.data.exists && response.data.outputs.length > 0) {
+      webglContent.value = response.data.outputs[0]
+    } else {
+      webglContent.value = ''
+    }
+  } catch (error) {
+    console.error('Error fetching WebGL content:', error)
+    webglContent.value = ''
+  }
+}
+
+// Refresh WebGL content
+async function refreshWebGL() {
+  await fetchWebGLContent()
+}
 
 // Environment state (Python/Conda)
 const environments = ref([])
@@ -544,7 +597,7 @@ const logOutput = ref(null)
 const dialogExpanded = ref(false)
 
 // File editor state - now with tabs
-const openTabs = ref([])  // Array of { path, name, language, cells, isDirty }
+const openTabs = ref([])  // Array of { path, name, language, cells, isDirty, htmlOutputs, isMarkdown, previewMode }
 const activeTabIndex = ref(-1)  // Currently active tab index
 
 // Computed properties for current file
@@ -592,18 +645,60 @@ const currentUseCells = computed(() => {
   return true
 })
 
-// Visualizer state
-const currentMolecule = ref(null)
-const visualizerHeight = ref(400)
-const boxVisible = ref(true)
-const boxSize = ref(10.0) // nanometers
+// Whether the current file is a markdown file
+const isMarkdownFile = computed(() => {
+  if (activeTabIndex.value >= 0 && activeTabIndex.value < openTabs.value.length) {
+    return openTabs.value[activeTabIndex.value].isMarkdown === true
+  }
+  return false
+})
 
-// Three.js objects
-let scene, camera, renderer, controls
-let animationId = null
-let moleculeGroup = null
-let unitBox = null
-let unitBoxEdges = null
+// Whether markdown preview mode is active
+const markdownPreviewMode = computed({
+  get: () => {
+    if (activeTabIndex.value >= 0 && activeTabIndex.value < openTabs.value.length) {
+      return openTabs.value[activeTabIndex.value].previewMode === true
+    }
+    return false
+  },
+  set: (value) => {
+    if (activeTabIndex.value >= 0 && activeTabIndex.value < openTabs.value.length) {
+      openTabs.value[activeTabIndex.value].previewMode = value
+    }
+  }
+})
+
+// Rendered markdown HTML
+const renderedMarkdown = computed(() => {
+  if (!isMarkdownFile.value || !markdownPreviewMode.value) return ''
+  if (activeTabIndex.value >= 0 && activeTabIndex.value < openTabs.value.length) {
+    const content = openTabs.value[activeTabIndex.value].cells[0]?.content || ''
+    return marked(content)
+  }
+  return ''
+})
+
+// HTML outputs for current file's cells
+const htmlOutputs = computed(() => {
+  if (activeTabIndex.value >= 0 && activeTabIndex.value < openTabs.value.length) {
+    return openTabs.value[activeTabIndex.value].htmlOutputs || []
+  }
+  return []
+})
+
+// Visualizer state
+const visualizerHeight = ref(400)
+const webglExpanded = ref(true)
+
+// Computed style for visualizer panel - collapses to header height when WebGL is collapsed
+const visualizerPanelStyle = computed(() => {
+  if (webglExpanded.value) {
+    return { height: visualizerHeight.value + 'px' }
+  } else {
+    // Collapsed: just show the header (~36px)
+    return { height: '36px', minHeight: '36px' }
+  }
+})
 
 // Resize handling
 let isResizing = false
@@ -988,6 +1083,7 @@ function getLanguageFromExt(filename) {
   const ext = filename.split('.').pop()?.toLowerCase()
   if (ext === 'cpp' || ext === 'c' || ext === 'h' || ext === 'hpp') return 'cpp'
   if (ext === 'sh' || ext === 'bash') return 'bash'
+  if (ext === 'md' || ext === 'markdown') return 'markdown'
   return 'python'
 }
 
@@ -1264,6 +1360,13 @@ async function executeCell(index) {
       ? (fileDir ? `${workspaceId.value}/${fileDir}` : String(workspaceId.value))
       : fileDir
 
+    // Cell output information for cm_output library
+    const cellInfo = {
+      filePath: currentFile.value?.path || '',
+      cellIndex: index,
+      isCellFile: currentUseCells.value
+    }
+
     if (language === 'cpp') {
       // C++ execution - use file-level settings
       jobType = 'execute_cpp'
@@ -1273,7 +1376,8 @@ async function executeCell(index) {
         cppEnvironment: selectedCppEnvironment.value || '',
         vendorEnvironment: selectedVendorEnvironment.value || '',
         compiler: selectedCompiler.value,
-        cppStandard: selectedCppStandard.value
+        cppStandard: selectedCppStandard.value,
+        cellInfo  // For HTML output support
       }
     } else {
       // Python/Bash execution - use file-level settings
@@ -1282,7 +1386,8 @@ async function executeCell(index) {
         code: cell.content,
         sourceDir,  // Workspace ID + directory containing the source file
         environment: selectedEnvironment.value,
-        language
+        language,
+        cellInfo  // For HTML output support
       }
     }
 
@@ -1365,6 +1470,12 @@ async function executeCell(index) {
       if (cell.status === 'running') {
         cell.status = 'completed'
       }
+      // Refresh HTML outputs and WebGL content after execution completes
+      // Use setTimeout to allow the compute service to write the output file
+      setTimeout(() => {
+        refreshHtmlOutputs()
+        fetchWebGLContent()
+      }, 500)
     }
 
   } catch (error) {
@@ -1392,18 +1503,8 @@ function handleJobResult(cell, result) {
     // Success - keep streamed output and add status line
     cell.status = 'completed'
 
-    // Check if result contains visualization data
-    if (parsed.visualization) {
-      renderMolecule(parsed.visualization)
-      if (!cell.output) {
-        cell.output = 'Visualization updated'
-      }
-    } else if (parsed.atoms || parsed.positions) {
-      renderMolecule(parsed)
-      if (!cell.output) {
-        cell.output = 'Molecule rendered'
-      }
-    } else if (parsed.output !== undefined && !cell.output) {
+    // Check if result contains output data
+    if (parsed.output !== undefined && !cell.output) {
       // Only set output if we don't already have streamed content
       cell.output = parsed.output + (parsed.stderr ? '\n' + parsed.stderr : '')
     }
@@ -1446,6 +1547,9 @@ function handleFileSelect(file) {
 
 async function openFile(file) {
   try {
+    // Switch to editor mode when opening a file
+    bottomPanelMode.value = 'editor'
+
     // Check if file is already open in a tab
     const existingIndex = openTabs.value.findIndex(tab => tab.path === file.path)
     if (existingIndex >= 0) {
@@ -1478,6 +1582,12 @@ async function openFile(file) {
         }]
       }
 
+      // Fetch HTML outputs from .out/ directory
+      const fileHtmlOutputs = await fetchHtmlOutputs(file.path)
+
+      // Check if this is a markdown file
+      const isMarkdown = file.name.toLowerCase().endsWith('.md')
+
       // Add new tab
       openTabs.value.push({
         path: file.path,
@@ -1485,7 +1595,10 @@ async function openFile(file) {
         language,
         cells: fileCells,
         isDirty: false,
-        useCells  // Track whether this file uses cell mode
+        useCells,  // Track whether this file uses cell mode
+        htmlOutputs: fileHtmlOutputs,  // HTML outputs from .out/ directory
+        isMarkdown,  // Track if this is a markdown file
+        previewMode: isMarkdown  // Start in preview mode for markdown files
       })
 
       // Switch to the new tab
@@ -1497,335 +1610,48 @@ async function openFile(file) {
   }
 }
 
-// ================== Visualizer Functions ==================
-
-function initThree() {
-  if (!viewport.value) return
-
-  // Scene
-  scene = new THREE.Scene()
-  scene.background = new THREE.Color(0x0a0a12)
-
-  // Camera
-  camera = new THREE.PerspectiveCamera(
-    60,
-    viewport.value.clientWidth / viewport.value.clientHeight,
-    0.1,
-    1000
-  )
-  camera.position.set(12, 8, 12)
-
-  // Renderer
-  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
-  renderer.setSize(viewport.value.clientWidth, viewport.value.clientHeight)
-  renderer.setPixelRatio(window.devicePixelRatio)
-  renderer.setClearColor(0x0a0a12, 1)
-  viewport.value.appendChild(renderer.domElement)
-
-  // Controls
-  controls = new OrbitControls(camera, renderer.domElement)
-  controls.enableDamping = true
-  controls.dampingFactor = 0.05
-  controls.target.set(0, 0, 0)
-
-  // Lights
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.4)
-  scene.add(ambientLight)
-
-  const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8)
-  directionalLight.position.set(10, 15, 10)
-  scene.add(directionalLight)
-
-  const backLight = new THREE.DirectionalLight(0x4488ff, 0.3)
-  backLight.position.set(-10, -5, -10)
-  scene.add(backLight)
-
-  // Create unit box
-  createUnitBox()
-
-  // Molecule group (inside the box)
-  moleculeGroup = new THREE.Group()
-  scene.add(moleculeGroup)
-
-  // Add sample molecule
-  addSampleMolecule()
-
-  // Animation loop
-  animate()
-
-  // Handle resize
-  window.addEventListener('resize', onWindowResize)
-}
-
-function createUnitBox() {
-  const size = boxSize.value
-
-  // Translucent box faces
-  const boxGeometry = new THREE.BoxGeometry(size, size, size)
-  const boxMaterial = new THREE.MeshPhongMaterial({
-    color: 0x00d4ff,
-    transparent: true,
-    opacity: 0.08,
-    side: THREE.DoubleSide,
-    depthWrite: false
-  })
-  unitBox = new THREE.Mesh(boxGeometry, boxMaterial)
-  scene.add(unitBox)
-
-  // Box edges (wireframe)
-  const edgesGeometry = new THREE.EdgesGeometry(boxGeometry)
-  const edgesMaterial = new THREE.LineBasicMaterial({
-    color: 0x00d4ff,
-    transparent: true,
-    opacity: 0.6
-  })
-  unitBoxEdges = new THREE.LineSegments(edgesGeometry, edgesMaterial)
-  scene.add(unitBoxEdges)
-
-  // Corner markers
-  const cornerSize = 0.15
-  const cornerMaterial = new THREE.MeshBasicMaterial({
-    color: 0x00d4ff,
-    transparent: true,
-    opacity: 0.8
-  })
-  const cornerGeometry = new THREE.SphereGeometry(cornerSize, 8, 8)
-
-  const halfSize = size / 2
-  const corners = [
-    [-halfSize, -halfSize, -halfSize],
-    [-halfSize, -halfSize, halfSize],
-    [-halfSize, halfSize, -halfSize],
-    [-halfSize, halfSize, halfSize],
-    [halfSize, -halfSize, -halfSize],
-    [halfSize, -halfSize, halfSize],
-    [halfSize, halfSize, -halfSize],
-    [halfSize, halfSize, halfSize]
-  ]
-
-  corners.forEach(pos => {
-    const corner = new THREE.Mesh(cornerGeometry, cornerMaterial)
-    corner.position.set(...pos)
-    unitBox.add(corner)
-  })
-
-  // Axis indicators at origin
-  const axisLength = size * 0.15
-  const axisWidth = 0.03
-
-  // X axis (red)
-  const xAxis = new THREE.Mesh(
-    new THREE.CylinderGeometry(axisWidth, axisWidth, axisLength, 8),
-    new THREE.MeshBasicMaterial({ color: 0xff4444 })
-  )
-  xAxis.rotation.z = -Math.PI / 2
-  xAxis.position.set(axisLength / 2 - halfSize, -halfSize, -halfSize)
-  unitBox.add(xAxis)
-
-  // Y axis (green)
-  const yAxis = new THREE.Mesh(
-    new THREE.CylinderGeometry(axisWidth, axisWidth, axisLength, 8),
-    new THREE.MeshBasicMaterial({ color: 0x44ff44 })
-  )
-  yAxis.position.set(-halfSize, axisLength / 2 - halfSize, -halfSize)
-  unitBox.add(yAxis)
-
-  // Z axis (blue)
-  const zAxis = new THREE.Mesh(
-    new THREE.CylinderGeometry(axisWidth, axisWidth, axisLength, 8),
-    new THREE.MeshBasicMaterial({ color: 0x4444ff })
-  )
-  zAxis.rotation.x = Math.PI / 2
-  zAxis.position.set(-halfSize, -halfSize, axisLength / 2 - halfSize)
-  unitBox.add(zAxis)
-}
-
-function toggleBoxVisible() {
-  boxVisible.value = !boxVisible.value
-  if (unitBox) unitBox.visible = boxVisible.value
-  if (unitBoxEdges) unitBoxEdges.visible = boxVisible.value
-}
-
-const atomColors = {
-  H: 0xffffff,
-  C: 0x404040,
-  N: 0x3050f8,
-  O: 0xff2020,
-  S: 0xffff30,
-  P: 0xff8000,
-  F: 0x90e050,
-  Cl: 0x1ff01f,
-  Br: 0xa62929,
-  I: 0x940094,
-  Fe: 0xe06633,
-  Ca: 0x3dff00,
-  Mg: 0x8aff00,
-  Zn: 0x7d80b0,
-  default: 0xff69b4
-}
-
-const atomRadii = {
-  H: 0.12,
-  C: 0.17,
-  N: 0.155,
-  O: 0.152,
-  S: 0.18,
-  P: 0.18,
-  Fe: 0.14,
-  Ca: 0.18,
-  Mg: 0.15,
-  Zn: 0.14,
-  default: 0.15
-}
-
-function addSampleMolecule() {
-  // Sample ATP molecule (simplified)
-  const atoms = [
-    { element: 'N', position: [0, 0, 0] },
-    { element: 'C', position: [0.5, 0.8, 0] },
-    { element: 'N', position: [1.5, 0.8, 0] },
-    { element: 'C', position: [2.0, 0, 0] },
-    { element: 'C', position: [1.5, -0.8, 0] },
-    { element: 'N', position: [0.5, -0.8, 0] },
-    { element: 'O', position: [-1.0, 0, 0] },
-    { element: 'C', position: [-1.5, 0.8, 0] },
-    { element: 'C', position: [-2.5, 0.5, 0] },
-    { element: 'C', position: [-2.5, -0.5, 0] },
-    { element: 'C', position: [-1.5, -0.8, 0] },
-    { element: 'P', position: [-3.5, 0, 0] },
-    { element: 'O', position: [-3.5, 0.8, 0.5] },
-    { element: 'O', position: [-3.5, -0.8, 0.5] },
-    { element: 'P', position: [-4.5, 0, 0] },
-    { element: 'O', position: [-4.5, 0.8, -0.5] },
-    { element: 'P', position: [-5.5, 0, 0] },
-    { element: 'O', position: [-5.5, 0.8, 0.5] },
-    { element: 'O', position: [-6.2, 0, 0] }
-  ]
-
-  const bonds = [
-    { start: 0, end: 1 }, { start: 1, end: 2 }, { start: 2, end: 3 },
-    { start: 3, end: 4 }, { start: 4, end: 5 }, { start: 5, end: 0 },
-    { start: 0, end: 6 }, { start: 6, end: 7 }, { start: 7, end: 8 },
-    { start: 8, end: 9 }, { start: 9, end: 10 }, { start: 10, end: 6 },
-    { start: 8, end: 11 }, { start: 11, end: 12 }, { start: 11, end: 13 },
-    { start: 11, end: 14 }, { start: 14, end: 15 }, { start: 14, end: 16 },
-    { start: 16, end: 17 }, { start: 16, end: 18 }
-  ]
-
-  renderMolecule({ atoms, bonds, name: 'ATP', formula: 'C10H16N5O13P3' })
-}
-
-function renderMolecule(data) {
-  while (moleculeGroup.children.length > 0) {
-    const child = moleculeGroup.children[0]
-    moleculeGroup.remove(child)
-    if (child.geometry) child.geometry.dispose()
-    if (child.material) child.material.dispose()
-  }
-
-  if (!data.atoms) return
-
-  const scaleFactor = 0.8
-
-  data.atoms.forEach((atom, index) => {
-    const element = atom.element || atom.type || 'C'
-    const pos = atom.position || atom.pos || [0, 0, 0]
-
-    const radius = (atomRadii[element] || atomRadii.default) * scaleFactor
-    const color = atomColors[element] || atomColors.default
-
-    const geometry = new THREE.SphereGeometry(radius, 24, 24)
-    const material = new THREE.MeshPhongMaterial({
-      color: color,
-      shininess: 80,
-      specular: 0x444444
-    })
-
-    const sphere = new THREE.Mesh(geometry, material)
-    sphere.position.set(pos[0] * scaleFactor, pos[1] * scaleFactor, pos[2] * scaleFactor)
-    sphere.userData = { index, element, ...atom }
-    moleculeGroup.add(sphere)
-  })
-
-  if (data.bonds) {
-    const bondMaterial = new THREE.MeshPhongMaterial({
-      color: 0x888888,
-      shininess: 30
-    })
-
-    data.bonds.forEach(bond => {
-      const startAtom = data.atoms[bond.start]
-      const endAtom = data.atoms[bond.end]
-
-      if (!startAtom || !endAtom) return
-
-      const startPos = new THREE.Vector3(...(startAtom.position || startAtom.pos || [0, 0, 0])).multiplyScalar(scaleFactor)
-      const endPos = new THREE.Vector3(...(endAtom.position || endAtom.pos || [0, 0, 0])).multiplyScalar(scaleFactor)
-
-      const direction = new THREE.Vector3().subVectors(endPos, startPos)
-      const length = direction.length()
-
-      const geometry = new THREE.CylinderGeometry(0.04, 0.04, length, 8)
-      const cylinder = new THREE.Mesh(geometry, bondMaterial)
-
-      cylinder.position.copy(startPos).add(endPos).multiplyScalar(0.5)
-      cylinder.quaternion.setFromUnitVectors(
-        new THREE.Vector3(0, 1, 0),
-        direction.normalize()
-      )
-
-      moleculeGroup.add(cylinder)
-    })
-  }
-
-  if (data.name || data.formula) {
-    currentMolecule.value = {
-      name: data.name || 'Unknown',
-      formula: data.formula || ''
-    }
-  }
-}
-
-function animate() {
-  animationId = requestAnimationFrame(animate)
-  controls.update()
-  renderer.render(scene, camera)
-}
-
-function onWindowResize() {
-  if (!viewport.value || !camera || !renderer) return
-
-  camera.aspect = viewport.value.clientWidth / viewport.value.clientHeight
-  camera.updateProjectionMatrix()
-  renderer.setSize(viewport.value.clientWidth, viewport.value.clientHeight)
-}
-
-function resetCamera() {
-  camera.position.set(12, 8, 12)
-  controls.target.set(0, 0, 0)
-  controls.update()
-}
-
-function clearScene() {
-  while (moleculeGroup.children.length > 0) {
-    const child = moleculeGroup.children[0]
-    moleculeGroup.remove(child)
-    if (child.geometry) child.geometry.dispose()
-    if (child.material) child.material.dispose()
-  }
-  currentMolecule.value = null
-}
-
 // ================== Resize Panel Functions ==================
 
+// Resize overlay element (created on first resize to block iframe pointer events)
+let resizeOverlay = null
+
+function createResizeOverlay() {
+  if (resizeOverlay) return resizeOverlay
+  resizeOverlay = document.createElement('div')
+  resizeOverlay.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 9999;
+    cursor: row-resize;
+  `
+  return resizeOverlay
+}
+
 function startResize(e) {
+  e.preventDefault()
   isResizing = true
-  document.addEventListener('mousemove', doResize)
-  document.addEventListener('mouseup', stopResize)
+
+  // Add overlay to capture pointer events over iframes
+  const overlay = createResizeOverlay()
+  document.body.appendChild(overlay)
+
+  // Use pointer events for better cross-platform handling
+  document.addEventListener('pointermove', doResize)
+  document.addEventListener('pointerup', stopResize)
+  document.addEventListener('pointercancel', stopResize)
+  // Fallback: stop resize if window loses focus
+  window.addEventListener('blur', stopResize)
+  // Prevent text selection during resize
+  document.body.style.userSelect = 'none'
+  document.body.style.cursor = 'row-resize'
 }
 
 function doResize(e) {
   if (!isResizing) return
+  e.preventDefault()
 
   const container = document.querySelector('.main-content')
   const containerRect = container.getBoundingClientRect()
@@ -1833,16 +1659,25 @@ function doResize(e) {
 
   if (newHeight >= 200 && newHeight <= containerRect.height - 150) {
     visualizerHeight.value = newHeight
-    nextTick(() => {
-      onWindowResize()
-    })
   }
 }
 
 function stopResize() {
+  if (!isResizing) return
   isResizing = false
-  document.removeEventListener('mousemove', doResize)
-  document.removeEventListener('mouseup', stopResize)
+
+  // Remove overlay
+  if (resizeOverlay && resizeOverlay.parentNode) {
+    resizeOverlay.parentNode.removeChild(resizeOverlay)
+  }
+
+  document.removeEventListener('pointermove', doResize)
+  document.removeEventListener('pointerup', stopResize)
+  document.removeEventListener('pointercancel', stopResize)
+  window.removeEventListener('blur', stopResize)
+  // Restore normal selection and cursor
+  document.body.style.userSelect = ''
+  document.body.style.cursor = ''
 }
 
 // ================== Keyboard Shortcuts ==================
@@ -1866,24 +1701,18 @@ onMounted(async () => {
     loadCppEnvironments(),
     loadVendorEnvironments(),
     loadCompilers(),
-    loadProfile()
+    loadProfile(),
+    fetchWebGLContent()
   ])
-  await nextTick()
-  initThree()
 
   // Add keyboard shortcut listener
   document.addEventListener('keydown', handleKeydown)
 })
 
 onUnmounted(() => {
-  if (animationId) {
-    cancelAnimationFrame(animationId)
-  }
-  window.removeEventListener('resize', onWindowResize)
   document.removeEventListener('keydown', handleKeydown)
-  if (renderer) {
-    renderer.dispose()
-  }
+  // Ensure resize cleanup if component unmounts during resize
+  stopResize()
 })
 </script>
 
@@ -2238,8 +2067,8 @@ onUnmounted(() => {
 /* Visualizer Panel (Top) */
 .visualizer-panel {
   position: relative;
-  min-height: 200px;
   background: #0a0a12;
+  transition: height 0.2s ease;
 }
 
 .viewport {
@@ -2825,5 +2654,196 @@ onUnmounted(() => {
 
 .log-line.error {
   color: #f87171;
+}
+
+/* Markdown Preview Button */
+.preview-btn {
+  padding: 0.3rem 0.6rem;
+  font-size: 0.8rem;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.preview-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.preview-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg-primary);
+}
+
+/* Markdown Preview Panel - styled like code cell editor */
+/* Using :deep() to style v-html injected content */
+.markdown-preview {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.5rem 2rem;
+  background: #1a1a24;
+  color: #f8f8f2;
+  font-family: 'Monaco', 'Menlo', 'Consolas', 'Liberation Mono', 'Courier New', monospace;
+  font-size: 0.9rem;
+  line-height: 1.7;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin: 0.5rem;
+}
+
+.markdown-preview :deep(h1),
+.markdown-preview :deep(h2),
+.markdown-preview :deep(h3),
+.markdown-preview :deep(h4),
+.markdown-preview :deep(h5),
+.markdown-preview :deep(h6) {
+  color: #bd93f9;
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.markdown-preview :deep(h1) {
+  font-size: 1.8em;
+  border-bottom: 1px solid #3a3a4a;
+  padding-bottom: 0.3em;
+}
+
+.markdown-preview :deep(h2) {
+  font-size: 1.4em;
+  border-bottom: 1px solid #3a3a4a;
+  padding-bottom: 0.3em;
+}
+
+.markdown-preview :deep(h3) {
+  font-size: 1.2em;
+  color: #ff79c6;
+}
+
+.markdown-preview :deep(h4),
+.markdown-preview :deep(h5),
+.markdown-preview :deep(h6) {
+  color: #8be9fd;
+}
+
+.markdown-preview :deep(p) {
+  margin: 0.75em 0;
+}
+
+.markdown-preview :deep(a) {
+  color: #50fa7b;
+  text-decoration: none;
+  transition: color 0.15s;
+}
+
+.markdown-preview :deep(a:hover) {
+  color: #69ff94;
+  text-decoration: underline;
+}
+
+.markdown-preview :deep(code) {
+  background: #12121a;
+  padding: 0.2em 0.4em;
+  border-radius: 3px;
+  font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+  font-size: 0.9em;
+  color: #f1fa8c;
+  border: 1px solid #2a2a3a;
+}
+
+.markdown-preview :deep(pre) {
+  background: #12121a;
+  padding: 1em;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 1em 0;
+  border: 1px solid #2a2a3a;
+}
+
+.markdown-preview :deep(pre code) {
+  background: transparent;
+  padding: 0;
+  font-size: 0.85em;
+  line-height: 1.5;
+  color: #f8f8f2;
+  border: none;
+}
+
+.markdown-preview :deep(ul),
+.markdown-preview :deep(ol) {
+  margin: 0.75em 0;
+  padding-left: 2em;
+}
+
+.markdown-preview :deep(li) {
+  margin: 0.25em 0;
+}
+
+.markdown-preview :deep(li::marker) {
+  color: #6272a4;
+}
+
+.markdown-preview :deep(blockquote) {
+  margin: 1em 0;
+  padding: 0.5em 1em;
+  border-left: 4px solid #bd93f9;
+  background: #12121a;
+  color: #6272a4;
+  font-style: italic;
+}
+
+.markdown-preview :deep(blockquote p) {
+  margin: 0.5em 0;
+}
+
+.markdown-preview :deep(table) {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1em 0;
+}
+
+.markdown-preview :deep(th),
+.markdown-preview :deep(td) {
+  border: 1px solid #3a3a4a;
+  padding: 0.5em 0.75em;
+  text-align: left;
+}
+
+.markdown-preview :deep(th) {
+  background: #12121a;
+  font-weight: 600;
+  color: #8be9fd;
+}
+
+.markdown-preview :deep(tr:nth-child(even)) {
+  background: rgba(98, 114, 164, 0.1);
+}
+
+.markdown-preview :deep(hr) {
+  border: none;
+  border-top: 1px solid #3a3a4a;
+  margin: 2em 0;
+}
+
+.markdown-preview :deep(img) {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  border: 1px solid #3a3a4a;
+}
+
+.markdown-preview :deep(strong) {
+  font-weight: 600;
+  color: #ffb86c;
+}
+
+.markdown-preview :deep(em) {
+  font-style: italic;
+  color: #ff79c6;
 }
 </style>

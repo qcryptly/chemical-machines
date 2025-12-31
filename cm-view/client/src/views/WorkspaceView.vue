@@ -335,7 +335,13 @@
         </div>
 
         <!-- Markdown Preview -->
-        <div class="markdown-preview" v-if="isMarkdownFile && markdownPreviewMode" v-html="renderedMarkdown"></div>
+        <div
+          class="markdown-preview"
+          v-if="isMarkdownFile && markdownPreviewMode"
+          v-html="renderedMarkdown"
+          ref="markdownPreviewRef"
+          @click="handleMarkdownClick"
+        ></div>
 
         <!-- Code Cells (hidden when markdown preview is active) -->
         <div class="cells" v-else-if="currentFile && cells.length > 0">
@@ -480,6 +486,29 @@ import Terminal from '../components/Terminal.vue'
 import MainWebGLPanel from '../components/MainWebGLPanel.vue'
 import { marked } from 'marked'
 
+// Helper to generate slug from text (for anchor IDs)
+function slugify(text) {
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/[^\w\s-]/g, '')  // Remove non-word chars
+    .replace(/\s+/g, '-')       // Replace spaces with dashes
+    .replace(/--+/g, '-')       // Replace multiple dashes with single
+}
+
+// Custom renderer to add IDs to headings for anchor links
+// (marked v15 removed built-in headerIds, need custom renderer)
+const renderer = {
+  heading({ tokens, depth }) {
+    const text = this.parser.parseInline(tokens)
+    const id = slugify(text.replace(/<[^>]*>/g, ''))  // Strip HTML tags for ID
+    return `<h${depth} id="${id}">${text}</h${depth}>\n`
+  }
+}
+
+// Configure marked with custom renderer
+marked.use({ renderer, gfm: true })
+
 const route = useRoute()
 
 // Workspace ID from route
@@ -527,6 +556,7 @@ const sidebarTab = ref('files')
 const bottomPanelMode = ref('editor')
 const terminalRef = ref(null)
 const fileBrowserRef = ref(null)
+const markdownPreviewRef = ref(null)
 
 // WebGL main view state
 const webglContent = ref('')
@@ -1245,7 +1275,49 @@ function closeFile() {
  */
 function switchToTab(index) {
   if (index >= 0 && index < openTabs.value.length) {
+    // Save scroll position of current tab before switching
+    if (activeTabIndex.value >= 0 && activeTabIndex.value < openTabs.value.length) {
+      const currentTab = openTabs.value[activeTabIndex.value]
+      if (currentTab.isMarkdown && markdownPreviewRef.value) {
+        currentTab.scrollTop = markdownPreviewRef.value.scrollTop
+      }
+    }
+
     activeTabIndex.value = index
+
+    // Restore scroll position of new tab after DOM updates
+    nextTick(() => {
+      const newTab = openTabs.value[index]
+      if (newTab.isMarkdown && markdownPreviewRef.value && newTab.scrollTop !== undefined) {
+        markdownPreviewRef.value.scrollTop = newTab.scrollTop
+      }
+    })
+  }
+}
+
+/**
+ * Handle clicks in markdown preview for anchor links
+ */
+function handleMarkdownClick(event) {
+  const target = event.target.closest('a')
+  if (!target) return
+
+  const href = target.getAttribute('href')
+  if (!href) return
+
+  // Handle anchor links (scroll to section)
+  if (href.startsWith('#')) {
+    event.preventDefault()
+    const id = href.slice(1)
+    const element = markdownPreviewRef.value?.querySelector(`[id="${id}"], [name="${id}"]`)
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }
+  // External links open in new tab
+  else if (href.startsWith('http://') || href.startsWith('https://')) {
+    event.preventDefault()
+    window.open(href, '_blank', 'noopener,noreferrer')
   }
 }
 

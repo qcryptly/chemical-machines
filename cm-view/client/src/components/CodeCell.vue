@@ -39,10 +39,10 @@ import { EditorState } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap, indentWithTab, insertNewlineAndIndent } from '@codemirror/commands'
 import { syntaxHighlighting, HighlightStyle, bracketMatching, foldGutter } from '@codemirror/language'
 import { autocompletion, completionKeymap, completeFromList } from '@codemirror/autocomplete'
-import { python } from '@codemirror/lang-python'
 import { cpp } from '@codemirror/lang-cpp'
 import { StreamLanguage } from '@codemirror/language'
 import { shell } from '@codemirror/legacy-modes/mode/shell'
+import { python as pythonLegacy } from '@codemirror/legacy-modes/mode/python'
 import { tags } from '@lezer/highlight'
 
 // Python completions - common builtins, keywords, and scientific computing
@@ -147,6 +147,89 @@ const pythonCompletions = [
   { label: 'np.dot', type: 'function', detail: 'dot product' },
   { label: 'np.random', type: 'namespace', detail: 'random number generation' },
   { label: 'np.linalg', type: 'namespace', detail: 'linear algebra' },
+  // CM library - views module
+  { label: 'cm.views', type: 'module', detail: 'CM visualization module' },
+  { label: 'from cm.views import', type: 'text', detail: 'import CM views' },
+  { label: 'html', type: 'function', detail: 'cm.views: render HTML' },
+  { label: 'text', type: 'function', detail: 'cm.views: render text' },
+  { label: 'log', type: 'function', detail: 'cm.views: log message' },
+  { label: 'table', type: 'function', detail: 'cm.views: render table' },
+  { label: 'image', type: 'function', detail: 'cm.views: display image' },
+  { label: 'savefig', type: 'function', detail: 'cm.views: save matplotlib figure' },
+  { label: 'dataframe', type: 'function', detail: 'cm.views: render pandas DataFrame' },
+  { label: 'scatter_3d', type: 'function', detail: 'cm.views: 3D scatter plot' },
+  { label: 'line_3d', type: 'function', detail: 'cm.views: 3D line plot' },
+  { label: 'lines_3d', type: 'function', detail: 'cm.views: multiple 3D lines' },
+  { label: 'surface', type: 'function', detail: 'cm.views: 3D surface plot' },
+  { label: 'vector_field', type: 'function', detail: 'cm.views: 3D vector field' },
+  { label: 'molecule', type: 'function', detail: 'cm.views: molecule visualization' },
+  { label: 'molecule_xyz', type: 'function', detail: 'cm.views: molecule from XYZ' },
+  { label: 'crystal', type: 'function', detail: 'cm.views: crystal structure' },
+  { label: 'webgl', type: 'function', detail: 'cm.views: raw WebGL HTML' },
+  { label: 'webgl_threejs', type: 'function', detail: 'cm.views: Three.js helper' },
+  { label: 'clear', type: 'function', detail: 'cm.views: clear cell output' },
+  { label: 'clear_all', type: 'function', detail: 'cm.views: clear all output' },
+  // CM library - symbols module
+  { label: 'cm.symbols', type: 'module', detail: 'CM LaTeX math module' },
+  { label: 'from cm.symbols import', type: 'text', detail: 'import CM symbols' },
+  { label: 'latex', type: 'function', detail: 'cm.symbols: render LaTeX' },
+  { label: 'equation', type: 'function', detail: 'cm.symbols: numbered equation' },
+  { label: 'align', type: 'function', detail: 'cm.symbols: aligned equations' },
+  { label: 'matrix', type: 'function', detail: 'cm.symbols: render matrix' },
+  { label: 'Math', type: 'class', detail: 'cm.symbols: math builder' },
+  { label: 'set_notation', type: 'function', detail: 'cm.symbols: set notation style' },
+  { label: 'set_line_height', type: 'function', detail: 'cm.symbols: set line spacing' },
+]
+
+// Math builder method completions (shown after typing "m." where m is a Math instance)
+const mathMethodCompletions = [
+  { label: 'var', type: 'method', detail: 'add variable', apply: 'var(' },
+  { label: 'equals', type: 'method', detail: 'add equals sign', apply: 'equals()' },
+  { label: 'plus', type: 'method', detail: 'add plus sign', apply: 'plus()' },
+  { label: 'minus', type: 'method', detail: 'add minus sign', apply: 'minus()' },
+  { label: 'times', type: 'method', detail: 'add times sign', apply: 'times()' },
+  { label: 'frac', type: 'method', detail: 'add fraction', apply: 'frac(' },
+  { label: 'sqrt', type: 'method', detail: 'add square root', apply: 'sqrt(' },
+  { label: 'sum', type: 'method', detail: 'add summation', apply: 'sum(' },
+  { label: 'prod', type: 'method', detail: 'add product', apply: 'prod(' },
+  { label: 'integral', type: 'method', detail: 'add integral', apply: 'integral(' },
+  { label: 'bra', type: 'method', detail: 'add bra ⟨x|', apply: 'bra(' },
+  { label: 'ket', type: 'method', detail: 'add ket |x⟩', apply: 'ket(' },
+  { label: 'braket', type: 'method', detail: 'add braket ⟨x|y⟩', apply: 'braket(' },
+  { label: 'dagger', type: 'method', detail: 'add dagger †', apply: 'dagger()' },
+  { label: 'conj', type: 'method', detail: 'add conjugate *', apply: 'conj()' },
+  { label: 'op', type: 'method', detail: 'add operator with hat', apply: 'op(' },
+  { label: 'expval', type: 'method', detail: 'expectation value', apply: 'expval(' },
+  { label: 'comm', type: 'method', detail: 'commutator [A,B]', apply: 'comm(' },
+  { label: 'matelem', type: 'method', detail: 'matrix element ⟨a|H|b⟩', apply: 'matelem(' },
+  { label: 'render', type: 'method', detail: 'render equation', apply: 'render()' },
+  { label: 'sup', type: 'method', detail: 'superscript', apply: 'sup(' },
+  { label: 'sub', type: 'method', detail: 'subscript', apply: 'sub(' },
+  { label: 'text', type: 'method', detail: 'add text', apply: 'text(' },
+  { label: 'space', type: 'method', detail: 'add space', apply: 'space()' },
+  { label: 'newline', type: 'method', detail: 'add newline', apply: 'newline()' },
+  { label: 'paren', type: 'method', detail: 'add parentheses', apply: 'paren(' },
+  { label: 'bracket', type: 'method', detail: 'add brackets', apply: 'bracket(' },
+  { label: 'brace', type: 'method', detail: 'add braces', apply: 'brace(' },
+  { label: 'abs', type: 'method', detail: 'absolute value', apply: 'abs(' },
+  { label: 'norm', type: 'method', detail: 'norm ||x||', apply: 'norm(' },
+  { label: 'hbar', type: 'method', detail: 'add ℏ', apply: 'hbar()' },
+  { label: 'nabla', type: 'method', detail: 'add ∇', apply: 'nabla()' },
+  { label: 'partial', type: 'method', detail: 'partial derivative', apply: 'partial(' },
+  { label: 'derivative', type: 'method', detail: 'derivative d/dx', apply: 'derivative(' },
+  // Symbolic determinants
+  { label: 'determinant_bra', type: 'method', detail: 'det expansion as bras', apply: 'determinant_bra(' },
+  { label: 'determinant_ket', type: 'method', detail: 'det expansion as kets', apply: 'determinant_ket(' },
+  { label: 'determinant_braket', type: 'method', detail: 'det expansion as brakets', apply: 'determinant_braket(' },
+  { label: 'determinant_product', type: 'method', detail: 'det as products', apply: 'determinant_product(' },
+  { label: 'determinant_subscript', type: 'method', detail: 'det with subscripts', apply: 'determinant_subscript(' },
+  { label: 'slater_determinant', type: 'method', detail: 'Slater determinant', apply: 'slater_determinant(' },
+  { label: 'slater_ket', type: 'method', detail: 'Slater ket notation', apply: 'slater_ket(' },
+  // Determinant inner products
+  { label: 'determinant_inner_product', type: 'method', detail: 'inner product with orthogonality', apply: 'determinant_inner_product(' },
+  { label: 'determinant_inner_product_simplified', type: 'method', detail: 'simplified inner product', apply: 'determinant_inner_product_simplified(' },
+  { label: 'slater_inner_product', type: 'method', detail: 'Slater det inner product', apply: 'slater_inner_product(' },
+  { label: 'determinant_overlap_expansion', type: 'method', detail: 'full overlap expansion', apply: 'determinant_overlap_expansion(' },
 ]
 
 // C++ completions
@@ -322,21 +405,70 @@ const showHtmlOutput = ref(true)
 let editorView = null
 
 const languageExtensions = {
-  python: () => python(),
+  python: () => StreamLanguage.define(pythonLegacy),
   cpp: () => cpp(),
-  bash: () => StreamLanguage.define(shell)
+  bash: () => StreamLanguage.define(shell),
+  markdown: () => []  // No syntax highlighting for markdown (uses preview)
 }
 
 function getLanguageExtension(lang) {
-  const factory = languageExtensions[lang] || languageExtensions.python
+  const factory = languageExtensions[lang]
+  if (!factory) return StreamLanguage.define(pythonLegacy)  // Default to Python
   return factory()
+}
+
+// Smart Python completion that detects context
+function pythonCompleter(context) {
+  const word = context.matchBefore(/[\w.]*/)
+  if (!word || (word.from === word.to && !context.explicit)) return null
+
+  const text = word.text
+  const doc = context.state.doc.toString()
+  const pos = context.pos
+
+  // Check if we're typing after a dot (method completion)
+  if (text.includes('.')) {
+    const parts = text.split('.')
+    const varName = parts.slice(0, -1).join('.')
+    const methodPrefix = parts[parts.length - 1]
+
+    // Look backwards in the document to find if this variable was assigned from Math()
+    const beforeCursor = doc.slice(0, pos - text.length)
+    const mathPattern = new RegExp(`${varName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*=\\s*Math\\(`, 'm')
+
+    if (mathPattern.test(beforeCursor)) {
+      // This is a Math instance - show Math methods
+      const filtered = mathMethodCompletions.filter(c =>
+        c.label.toLowerCase().startsWith(methodPrefix.toLowerCase())
+      )
+      if (filtered.length > 0) {
+        return {
+          from: word.from + varName.length + 1,  // After the dot
+          options: filtered
+        }
+      }
+    }
+  }
+
+  // Default: show general Python completions
+  const completions = getCompletions('python')
+  const filtered = completions.filter(c =>
+    c.label.toLowerCase().startsWith(text.toLowerCase())
+  )
+
+  return {
+    from: word.from,
+    options: filtered
+  }
 }
 
 function createEditor() {
   if (!editorContainer.value) return
 
   // Create language-specific autocomplete
-  const languageCompletions = completeFromList(getCompletions(props.language))
+  const languageCompletions = props.language === 'python'
+    ? pythonCompleter
+    : completeFromList(getCompletions(props.language))
 
   const extensions = [
     lineNumbers(),

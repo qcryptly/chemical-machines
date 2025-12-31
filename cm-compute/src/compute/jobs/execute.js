@@ -66,9 +66,12 @@ async function execute(params, context) {
   const cellEnv = {};
   if (cellInfo) {
     const { filePath, cellIndex, isCellFile } = cellInfo;
-    // Output file path: .out/filename.html in the workspace
-    const outputFile = filePath
-      ? path.join(sourceFullDir, '.out', `${filePath}.html`)
+    // Output file path: .out/filename.html in the source directory
+    // filePath may include subdirectory (e.g., "subdir/file.cell.py")
+    // We only want the filename for the .out path since sourceFullDir already includes the directory
+    const fileName = filePath ? path.basename(filePath) : '';
+    const outputFile = fileName
+      ? path.join(sourceFullDir, '.out', `${fileName}.html`)
       : '';
 
     cellEnv.CM_OUTPUT_FILE = outputFile;

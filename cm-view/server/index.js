@@ -627,10 +627,21 @@ app.get('/api/workspaces/:workspaceId/output/:path(*)', async (req, res) => {
     const requestedPath = req.params.path;
 
     // Determine the HTML output path
-    // For myfile.cell.py -> .out/myfile.cell.py.html
-    // For myfile.py -> .out/myfile.py.html
-    const htmlFileName = requestedPath + '.html';
-    const outputPath = path.join(workspaceDir, '.out', htmlFileName);
+    // For files in subdirectories, the .out folder is inside the subdirectory
+    // e.g., subdir/myfile.cell.py -> subdir/.out/myfile.cell.py.html
+    // For files in root: myfile.cell.py -> .out/myfile.cell.py.html
+    const dirPart = path.dirname(requestedPath);
+    const fileName = path.basename(requestedPath);
+    const htmlFileName = fileName + '.html';
+
+    let outputPath;
+    if (dirPart && dirPart !== '.') {
+      // File is in a subdirectory - .out is inside that directory
+      outputPath = path.join(workspaceDir, dirPart, '.out', htmlFileName);
+    } else {
+      // File is in root - .out is at workspace root
+      outputPath = path.join(workspaceDir, '.out', htmlFileName);
+    }
 
     // Validate path to prevent directory traversal
     const resolvedPath = path.resolve(outputPath);
@@ -639,10 +650,17 @@ app.get('/api/workspaces/:workspaceId/output/:path(*)', async (req, res) => {
       return res.status(403).json({ error: 'Invalid path' });
     }
 
-    // Check if output file exists
+    // Check if output file exists, create .out directory if needed
     try {
       await fs.access(outputPath);
     } catch {
+      // Output doesn't exist - ensure .out directory exists for future writes
+      const outDir = path.dirname(outputPath);
+      try {
+        await fs.mkdir(outDir, { recursive: true });
+      } catch {
+        // Ignore mkdir errors
+      }
       return res.json({ exists: false, outputs: [] });
     }
 

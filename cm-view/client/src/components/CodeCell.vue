@@ -24,9 +24,8 @@
 
     <!-- HTML Output Panel -->
     <OutputPanel
-      v-if="htmlOutput && showHtmlOutput"
+      v-if="htmlOutput"
       :html-content="htmlOutput"
-      @close="showHtmlOutput = false"
     />
   </div>
 </template>
@@ -401,7 +400,6 @@ const emit = defineEmits(['update', 'run', 'delete', 'blur'])
 
 const editorContainer = ref(null)
 const isFocused = ref(false)
-const showHtmlOutput = ref(true)
 let editorView = null
 
 const languageExtensions = {
@@ -635,12 +633,6 @@ watch(() => props.language, () => {
   }
 })
 
-// Show output panel when new HTML output arrives
-watch(() => props.htmlOutput, (newOutput) => {
-  if (newOutput) {
-    showHtmlOutput.value = true
-  }
-})
 
 onMounted(() => {
   createEditor()

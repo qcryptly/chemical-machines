@@ -1,10 +1,12 @@
 <template>
   <div class="output-panel" v-if="htmlContent">
-    <div class="output-header">
+    <div class="output-header" @click="toggleCollapse">
       <span class="output-label">Output</span>
-      <button @click="$emit('close')" class="close-btn" title="Close output">&times;</button>
+      <button class="collapse-btn" :title="isCollapsed ? 'Expand output' : 'Collapse output'">
+        <span class="chevron" :class="{ collapsed: isCollapsed }">&#9660;</span>
+      </button>
     </div>
-    <div class="output-content">
+    <div class="output-content" v-show="!isCollapsed">
       <iframe
         ref="outputFrame"
         class="output-frame"
@@ -23,27 +25,37 @@ const props = defineProps({
   htmlContent: { type: String, default: '' }
 })
 
-defineEmits(['close'])
-
 const outputFrame = ref(null)
+const isCollapsed = ref(false)
 
-// MathJax CDN for math rendering (more permissive loading than KaTeX)
+function toggleCollapse() {
+  isCollapsed.value = !isCollapsed.value
+}
+
+// MathJax CDN for math rendering with automatic line breaking
 const mathJaxCdn = `
 <script>
   MathJax = {
+    loader: {
+      load: ['[tex]/textmacros']
+    },
     tex: {
       inlineMath: [['\\\\(', '\\\\)'], ['$', '$']],
-      displayMath: [['\\\\[', '\\\\]'], ['$$', '$$']]
+      displayMath: [['\\\\[', '\\\\]'], ['$$', '$$']],
+      packages: {'[+]': ['textmacros']}
     },
-    svg: {
-      fontCache: 'global'
+    chtml: {
+      // Match font size to surrounding text
+      matchFontHeight: true,
+      // Scale factor for math
+      scale: 1
     },
     startup: {
       typeset: true
     }
   };
 <\/script>
-<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js" async><\/script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml-full.js" async><\/script>
 `
 
 // Dark mode styles to inject into iframe content
@@ -219,9 +231,74 @@ const darkModeStyles = `
   }
   mjx-container {
     color: #cdd6f4 !important;
+    /* Force line breaking */
+    display: block !important;
+    overflow-wrap: break-word !important;
+    word-wrap: break-word !important;
+    word-break: break-word !important;
+    white-space: normal !important;
+    max-width: 100% !important;
+    padding: 0.5rem 1rem !important;
   }
   mjx-container[jax="SVG"] > svg {
     color: #cdd6f4;
+    max-width: 100%;
+    height: auto;
+  }
+  mjx-container[jax="CHTML"] {
+    color: #cdd6f4 !important;
+    /* CHTML specific line breaking */
+    display: block !important;
+    max-width: 100% !important;
+    overflow-wrap: break-word !important;
+  }
+  /* Force MathJax internal elements to allow wrapping */
+  mjx-math {
+    white-space: normal !important;
+    word-wrap: break-word !important;
+    overflow-wrap: break-word !important;
+    display: inline-block !important;
+    max-width: 100% !important;
+  }
+  mjx-mrow {
+    white-space: normal !important;
+    flex-wrap: wrap !important;
+  }
+  /* Math container with horizontal scroll for long equations */
+  .cm-math-scroll {
+    overflow-x: auto;
+    overflow-y: hidden;
+    max-width: 100%;
+    padding-bottom: 0.25rem;
+  }
+  .cm-math-scroll::-webkit-scrollbar {
+    height: 6px;
+  }
+  .cm-math-scroll::-webkit-scrollbar-track {
+    background: #313244;
+    border-radius: 3px;
+  }
+  .cm-math-scroll::-webkit-scrollbar-thumb {
+    background: #45475a;
+    border-radius: 3px;
+  }
+  .cm-math-scroll::-webkit-scrollbar-thumb:hover {
+    background: #585b70;
+  }
+  /* Multi-line math display using aligned environment */
+  .cm-math-multiline mjx-container {
+    display: block;
+  }
+  /* Allow display math to scroll if too wide */
+  mjx-container[display="true"] {
+    max-width: 100%;
+    overflow-x: auto;
+    padding: 0.25rem 0;
+  }
+  /* Force cm-math containers to constrain width */
+  .cm-math {
+    max-width: 100%;
+    overflow-x: auto;
   }
 </style>
 `
@@ -300,6 +377,12 @@ watch(() => props.htmlContent, () => {
   padding: 0.25rem 0.5rem;
   background: #262637;
   border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+}
+
+.output-header:hover {
+  background: #2d2d42;
 }
 
 .output-label {
@@ -310,18 +393,27 @@ watch(() => props.htmlContent, () => {
   letter-spacing: 0.05em;
 }
 
-.close-btn {
+.collapse-btn {
   background: none;
   border: none;
   color: #6c7086;
-  font-size: 1rem;
+  font-size: 0.6rem;
   cursor: pointer;
   padding: 0 0.25rem;
   line-height: 1;
 }
 
-.close-btn:hover {
+.collapse-btn:hover {
   color: #cdd6f4;
+}
+
+.chevron {
+  display: inline-block;
+  transition: transform 0.2s ease;
+}
+
+.chevron.collapsed {
+  transform: rotate(-90deg);
 }
 
 .output-content {

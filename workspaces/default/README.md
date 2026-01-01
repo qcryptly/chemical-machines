@@ -30,6 +30,7 @@ Complete reference documentation for the `cm` library - a Python library for cre
   - [Overlaps with @ Operator](#overlaps-with--operator)
   - [Hamiltonian Matrix Elements](#hamiltonian-matrix-elements)
   - [Slater-Condon Rules](#slater-condon-rules)
+  - [Relativistic Quantum Mechanics](#relativistic-quantum-mechanics)
 - [C++ Support](#c-support)
 - [Colormaps Reference](#colormaps-reference)
 - [Element Data Reference](#element-data-reference)
@@ -1644,6 +1645,135 @@ html("<p>Single excitation ⟨ionic|H|covalent⟩:</p>")
 
 html("<p>Double excitation ⟨ionic_A|H|ionic_B⟩:</p>")
 (config_ionic_A @ H @ config_ionic_B).render()
+```
+
+---
+
+### Relativistic Quantum Mechanics
+
+For heavy atoms where relativistic effects are significant, use four-component Dirac spinors instead of non-relativistic spin-orbitals.
+
+#### The κ Quantum Number
+
+In relativistic QM, spin-orbit coupling is built-in. The κ quantum number encodes both orbital (l) and total (j) angular momentum:
+
+| Orbital | l | j | κ | States |
+|---------|---|---|---|--------|
+| s₁/₂ | 0 | 1/2 | -1 | 2 |
+| p₁/₂ | 1 | 1/2 | +1 | 2 |
+| p₃/₂ | 1 | 3/2 | -2 | 4 |
+| d₃/₂ | 2 | 3/2 | +2 | 4 |
+| d₅/₂ | 2 | 5/2 | -3 | 6 |
+
+**Formula:** κ = -(l+1) for j = l+1/2, κ = +l for j = l-1/2
+
+#### `qm.dirac_spinor(n, kappa, mj)`
+
+Create a Dirac spinor using the κ quantum number.
+
+```python
+from cm import qm
+
+# 1s₁/₂ with mⱼ = +1/2
+spinor_1s = qm.dirac_spinor(n=1, kappa=-1, mj=0.5)
+
+# 2p₃/₂ with mⱼ = -3/2
+spinor_2p = qm.dirac_spinor(n=2, kappa=-2, mj=-1.5)
+
+print(spinor_1s.j)  # 0.5
+print(spinor_1s.l)  # 0
+print(spinor_2p.j)  # 1.5
+print(spinor_2p.l)  # 1
+```
+
+#### `qm.dirac_spinor_lj(n, l, j, mj)`
+
+Create a Dirac spinor using the more intuitive (n, l, j, mⱼ) notation.
+
+```python
+from cm import qm
+
+# 2p₃/₂ with mⱼ = +1/2
+spinor = qm.dirac_spinor_lj(n=2, l=1, j=1.5, mj=0.5)
+print(spinor.kappa)  # -2
+```
+
+#### `qm.basis_dirac(quantum_numbers)`
+
+Create multiple Dirac spinors from tuples.
+
+```python
+from cm import qm
+
+# Using (n, κ, mⱼ) format
+spinors = qm.basis_dirac([
+    (1, -1, 0.5),   # 1s₁/₂ mⱼ=+1/2
+    (1, -1, -0.5),  # 1s₁/₂ mⱼ=-1/2
+])
+
+# Using (n, l, j, mⱼ) format
+spinors = qm.basis_dirac([
+    (2, 1, 1.5, 0.5),   # 2p₃/₂ mⱼ=+1/2
+    (2, 1, 1.5, -0.5),  # 2p₃/₂ mⱼ=-1/2
+])
+```
+
+#### `qm.dirac_slater(spinors)`
+
+Create a Slater determinant of Dirac spinors.
+
+```python
+from cm import qm
+
+spinors = qm.basis_dirac([(1, -1, 0.5), (1, -1, -0.5)])
+psi = qm.dirac_slater(spinors)
+psi.render()  # |n, κ, mⱼ⟩ notation
+psi.render(notation="spectroscopic")  # |1s_{1/2}(+1/2), ...⟩
+```
+
+#### Dirac Hamiltonians
+
+```python
+from cm import qm
+
+# Dirac-Coulomb (standard relativistic)
+H_DC = qm.dirac_hamiltonian("coulomb")
+
+# Dirac-Coulomb-Gaunt (adds magnetic interaction)
+H_DCG = qm.dirac_hamiltonian("coulomb_gaunt")
+
+# Dirac-Coulomb-Breit (most accurate - includes retardation)
+H_DCB = qm.dirac_hamiltonian("coulomb_breit")
+
+# Pre-defined aliases
+H_DC = qm.H_DC    # Dirac-Coulomb
+H_DCB = qm.H_DCB  # Dirac-Coulomb-Breit
+```
+
+#### Relativistic Matrix Elements
+
+```python
+from cm import qm
+
+# Create configurations
+spinor_1s_up = qm.dirac_spinor(n=1, kappa=-1, mj=0.5)
+spinor_1s_down = qm.dirac_spinor(n=1, kappa=-1, mj=-0.5)
+config_1s2 = qm.dirac_slater([spinor_1s_up, spinor_1s_down])
+
+spinor_2p_up = qm.dirac_spinor(n=2, kappa=1, mj=0.5)
+spinor_2p_down = qm.dirac_spinor(n=2, kappa=1, mj=-0.5)
+config_2p2 = qm.dirac_slater([spinor_2p_up, spinor_2p_down])
+
+# Dirac-Coulomb-Breit Hamiltonian
+H_DCB = qm.dirac_hamiltonian("coulomb_breit")
+
+# Matrix elements (same Slater-Condon rules apply)
+(config_1s2 @ H_DCB @ config_1s2).render()  # Diagonal
+(config_1s2 @ H_DCB @ config_2p2).render()  # Double excitation
+
+# Overlaps
+overlap = config_1s2 @ config_1s2
+print(overlap.value)  # 1
 ```
 
 ---

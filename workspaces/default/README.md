@@ -24,6 +24,12 @@ Complete reference documentation for the `cm` library - a Python library for cre
   - [Math Builder Class](#math-builder-class)
   - [Notation Styles](#notation-styles)
   - [Chemistry Helpers](#chemistry-helpers)
+- [cm.qm Module](#cmqm-module)
+  - [Spin-Orbitals](#spin-orbitals)
+  - [Slater Determinants](#slater-determinants)
+  - [Overlaps with @ Operator](#overlaps-with--operator)
+  - [Hamiltonian Matrix Elements](#hamiltonian-matrix-elements)
+  - [Slater-Condon Rules](#slater-condon-rules)
 - [C++ Support](#c-support)
 - [Colormaps Reference](#colormaps-reference)
 - [Element Data Reference](#element-data-reference)
@@ -1403,6 +1409,241 @@ from cm.symbols import sqrt
 
 sqrt("x")           # √x
 sqrt("x", n="3")    # ³√x
+```
+
+---
+
+## cm.qm Module
+
+The quantum mechanics module provides tools for working with Slater determinants, spin-orbitals, and matrix elements using spherical harmonic basis functions. It automatically applies Slater-Condon rules to simplify Hamiltonian matrix elements.
+
+```python
+from cm import qm
+```
+
+### Spin-Orbitals
+
+Create spin-orbital basis elements using spherical harmonic quantum numbers.
+
+#### `qm.basis_sh_element(spin, L, m, n=None)`
+
+Create a single spin-orbital.
+
+**Parameters:**
+- `spin`: +1 for spin-up (α), -1 for spin-down (β)
+- `L`: Angular momentum quantum number (0=s, 1=p, 2=d, 3=f, ...)
+- `m`: Magnetic quantum number (-L ≤ m ≤ L)
+- `n`: Optional principal quantum number
+
+```python
+from cm import qm
+
+# 1s spin-up orbital
+orbital_1s_up = qm.basis_sh_element(spin=1, L=0, m=0, n=1)
+
+# 2p spin-down with m=-1
+orbital_2p_down = qm.basis_sh_element(spin=-1, L=1, m=-1, n=2)
+```
+
+#### `qm.basis_sh(quantum_numbers)`
+
+Create multiple spin-orbitals from a list of tuples.
+
+**Parameters:**
+- `quantum_numbers`: List of tuples `(spin, L, m)` or `(spin, L, m, n)`
+
+```python
+from cm import qm
+
+# Helium ground state: 1s↑ 1s↓
+orbitals = qm.basis_sh([(1, 0, 0, 1), (-1, 0, 0, 1)])
+
+# Lithium: 1s↑ 1s↓ 2s↑
+orbitals = qm.basis_sh([
+    (1, 0, 0, 1),   # 1s↑
+    (-1, 0, 0, 1),  # 1s↓
+    (1, 0, 0, 2)    # 2s↑
+])
+```
+
+### Slater Determinants
+
+#### `qm.slater(orbitals)`
+
+Create a Slater determinant from a list of spin-orbitals.
+
+```python
+from cm import qm
+
+# Create orbitals
+orbital_1sA_up = qm.basis_sh_element(spin=1, L=0, m=0, n=1)
+orbital_1sA_down = qm.basis_sh_element(spin=-1, L=0, m=0, n=1)
+
+# Create Slater determinant
+psi = qm.slater([orbital_1sA_up, orbital_1sA_down])
+psi.render()  # Renders: |1, 0, 0, ↑, 1, 0, 0, ↓⟩
+```
+
+The Slater determinant automatically handles:
+- Pauli exclusion principle (raises error for duplicate orbitals)
+- Antisymmetry under particle exchange
+- Orthogonality between spin-orbitals
+
+### Overlaps with @ Operator
+
+Use the `@` operator to compute overlaps ⟨ψ|φ⟩ between Slater determinants.
+
+```python
+from cm import qm
+
+# Same orbitals - overlap is 1
+psi = qm.slater(qm.basis_sh([(1, 0, 0), (-1, 0, 0)]))
+phi = qm.slater(qm.basis_sh([(1, 0, 0), (-1, 0, 0)]))
+overlap = psi @ phi
+print(overlap.value)  # 1
+
+# Different orbitals - overlap is 0 (orthogonal)
+chi = qm.slater(qm.basis_sh([(1, 0, 0), (1, 1, 0)]))
+overlap = psi @ chi
+print(overlap.value)  # 0
+
+# Render the overlap
+(psi @ phi).render()
+```
+
+### Hamiltonian Matrix Elements
+
+Use the `@` operator with a Hamiltonian to compute matrix elements ⟨ψ|Ĥ|φ⟩.
+
+#### `qm.hamiltonian(symbol="H")`
+
+Create a Hamiltonian operator.
+
+```python
+from cm import qm
+
+H = qm.hamiltonian()
+# Or use the pre-defined alias:
+# H = qm.H
+```
+
+#### Computing Matrix Elements
+
+```python
+from cm import qm
+
+# Create determinants
+orbitals_A = qm.basis_sh([(1, 0, 0, 1), (-1, 0, 0, 1)])
+orbitals_B = qm.basis_sh([(1, 0, 0, 2), (-1, 0, 0, 2)])
+psi = qm.slater(orbitals_A)
+phi = qm.slater(orbitals_B)
+
+H = qm.hamiltonian()
+
+# Compute matrix element ⟨ψ|Ĥ|φ⟩
+matrix_elem = psi @ H @ phi
+matrix_elem.render()
+```
+
+### Slater-Condon Rules
+
+Matrix elements are automatically simplified using Slater-Condon rules based on the number of orbital differences:
+
+| Excitations | Result |
+|-------------|--------|
+| 0 (diagonal) | ∑ᵢ ⟨i|ĥ|i⟩ + ½∑ᵢ≠ⱼ [⟨ij|ĝ|ij⟩ - ⟨ij|ĝ|ji⟩] |
+| 1 (single) | ⟨p|ĥ|q⟩ + ∑ⱼ [⟨pj|ĝ|qj⟩ - ⟨pj|ĝ|jq⟩] |
+| 2 (double) | ⟨pq|ĝ|rs⟩ - ⟨pq|ĝ|sr⟩ |
+| 3+ | 0 |
+
+```python
+from cm import qm
+
+# Define orbitals for H₂ molecule
+orbital_1sA_up = qm.basis_sh_element(spin=1, L=0, m=0, n=1)
+orbital_1sA_down = qm.basis_sh_element(spin=-1, L=0, m=0, n=1)
+orbital_1sB_up = qm.basis_sh_element(spin=1, L=0, m=0, n=2)
+orbital_1sB_down = qm.basis_sh_element(spin=-1, L=0, m=0, n=2)
+
+# Ionic configurations
+ionic_A = qm.slater([orbital_1sA_up, orbital_1sA_down])
+ionic_B = qm.slater([orbital_1sB_up, orbital_1sB_down])
+
+# Covalent configuration
+covalent = qm.slater([orbital_1sA_up, orbital_1sB_down])
+
+H = qm.hamiltonian()
+
+# Diagonal element (0 excitations)
+(ionic_A @ H @ ionic_A).render()
+
+# Single excitation
+(ionic_A @ H @ covalent).render()
+
+# Double excitation
+(ionic_A @ H @ ionic_B).render()
+```
+
+### One-Electron and Two-Electron Operators
+
+For more specific operators:
+
+```python
+from cm import qm
+
+h = qm.one_electron_operator("h")   # Kinetic + nuclear attraction
+g = qm.two_electron_operator("g")   # Electron-electron repulsion
+```
+
+### Complete H₂ Example
+
+```python
+# %%
+from cm import qm
+from cm.views import html
+
+html("<h2>H₂ Molecule - Slater Determinant Basis</h2>")
+
+# Define atomic orbitals: 1s on atom A (n=1) and atom B (n=2)
+orbital_1sA_up = qm.basis_sh_element(spin=1, L=0, m=0, n=1)
+orbital_1sA_down = qm.basis_sh_element(spin=-1, L=0, m=0, n=1)
+orbital_1sB_up = qm.basis_sh_element(spin=1, L=0, m=0, n=2)
+orbital_1sB_down = qm.basis_sh_element(spin=-1, L=0, m=0, n=2)
+
+# Ionic configurations (both electrons on one atom)
+html("<h3>Ionic Configurations</h3>")
+config_ionic_A = qm.slater([orbital_1sA_up, orbital_1sA_down])
+config_ionic_B = qm.slater([orbital_1sB_up, orbital_1sB_down])
+html("<p>H⁻ₐ H⁺ᵦ:</p>")
+config_ionic_A.render()
+html("<p>H⁺ₐ H⁻ᵦ:</p>")
+config_ionic_B.render()
+
+# Covalent configurations (one electron on each atom)
+html("<h3>Covalent Configurations</h3>")
+config_cov_1 = qm.slater([orbital_1sA_up, orbital_1sB_down])
+config_cov_2 = qm.slater([orbital_1sA_down, orbital_1sB_up])
+config_cov_1.render()
+config_cov_2.render()
+
+# Overlaps
+html("<h3>Overlap Matrix Elements</h3>")
+html(f"<p>⟨ionic_A|ionic_A⟩ = {(config_ionic_A @ config_ionic_A).value}</p>")
+html(f"<p>⟨ionic_A|ionic_B⟩ = {(config_ionic_A @ config_ionic_B).value}</p>")
+html(f"<p>⟨ionic_A|covalent⟩ = {(config_ionic_A @ config_cov_1).value}</p>")
+
+# Hamiltonian matrix elements
+html("<h3>Hamiltonian Matrix Elements</h3>")
+H = qm.hamiltonian()
+
+html("<p>Diagonal ⟨Ψ|H|Ψ⟩:</p>")
+(config_ionic_A @ H @ config_ionic_A).render()
+
+html("<p>Single excitation ⟨ionic|H|covalent⟩:</p>")
+(config_ionic_A @ H @ config_cov_1).render()
+
+html("<p>Double excitation ⟨ionic_A|H|ionic_B⟩:</p>")
+(config_ionic_A @ H @ config_ionic_B).render()
 ```
 
 ---

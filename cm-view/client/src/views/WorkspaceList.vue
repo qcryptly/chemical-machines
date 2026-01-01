@@ -4,7 +4,20 @@
       <h2>Workspaces</h2>
     </div>
 
-    <div class="workspaces">
+    <!-- Loading State -->
+    <div v-if="isLoading" class="loading-container">
+      <div class="loading-spinner"></div>
+      <p class="loading-text">Loading workspaces...</p>
+    </div>
+
+    <!-- Error State -->
+    <div v-else-if="loadError" class="error-container">
+      <p class="error-text">Failed to load workspaces</p>
+      <p class="error-detail">{{ loadError }}</p>
+      <button @click="loadWorkspaces" class="retry-btn">Retry</button>
+    </div>
+
+    <div v-else class="workspaces">
       <!-- Create New Workspace Tile -->
       <div
         class="workspace-card create-card"
@@ -35,8 +48,11 @@
             </select>
           </div>
           <div class="create-actions">
-            <button @click.stop="createWorkspace" class="create-btn" :disabled="!newWorkspaceName.trim()">Create</button>
-            <button @click.stop="cancelCreating" class="cancel-btn">Cancel</button>
+            <button @click.stop="createWorkspace" class="create-btn" :disabled="!newWorkspaceName.trim() || isCreatingWorkspace">
+              <span v-if="isCreatingWorkspace" class="btn-spinner"></span>
+              {{ isCreatingWorkspace ? 'Creating...' : 'Create' }}
+            </button>
+            <button @click.stop="cancelCreating" class="cancel-btn" :disabled="isCreatingWorkspace">Cancel</button>
           </div>
         </template>
       </div>
@@ -46,11 +62,15 @@
         v-for="workspace in workspaces"
         :key="workspace.id"
         class="workspace-card"
+        :class="{ deleting: deletingId === workspace.id }"
         @click="openWorkspace(workspace.id)"
       >
         <div class="workspace-header">
           <h3>{{ workspace.name }}</h3>
-          <button @click.stop="deleteWorkspace(workspace)" class="delete-btn" title="Delete workspace">&times;</button>
+          <button @click.stop="deleteWorkspace(workspace)" class="delete-btn" title="Delete workspace" :disabled="deletingId === workspace.id">
+            <span v-if="deletingId === workspace.id" class="btn-spinner small"></span>
+            <span v-else>&times;</span>
+          </button>
         </div>
 
         <div class="workspace-meta">
@@ -95,9 +115,13 @@ const router = useRouter()
 const workspaces = ref([])
 const templates = ref([])
 const isCreating = ref(false)
+const isCreatingWorkspace = ref(false)
 const newWorkspaceName = ref('')
 const selectedTemplate = ref('default')
 const nameInput = ref(null)
+const isLoading = ref(true)
+const loadError = ref(null)
+const deletingId = ref(null)
 
 async function loadTemplates() {
   try {
@@ -113,11 +137,16 @@ async function loadTemplates() {
 }
 
 async function loadWorkspaces() {
+  isLoading.value = true
+  loadError.value = null
   try {
     const response = await axios.get('/api/workspaces')
     workspaces.value = response.data
   } catch (error) {
     console.error('Error loading workspaces:', error)
+    loadError.value = error.response?.data?.error || error.message || 'Unknown error'
+  } finally {
+    isLoading.value = false
   }
 }
 
@@ -149,8 +178,9 @@ function handleInputBlur(event) {
 
 async function createWorkspace() {
   const name = newWorkspaceName.value.trim()
-  if (!name) return
+  if (!name || isCreatingWorkspace.value) return
 
+  isCreatingWorkspace.value = true
   try {
     const response = await axios.post('/api/workspaces', {
       name,
@@ -163,6 +193,8 @@ async function createWorkspace() {
   } catch (error) {
     console.error('Error creating workspace:', error)
     alert(`Failed to create workspace: ${error.response?.data?.error || error.message}`)
+  } finally {
+    isCreatingWorkspace.value = false
   }
 }
 
@@ -171,12 +203,16 @@ async function deleteWorkspace(workspace) {
     return
   }
 
+  deletingId.value = workspace.id
   try {
     await axios.delete(`/api/workspaces/${workspace.id}`)
-    await loadWorkspaces()
+    // Remove from list without full reload for faster feedback
+    workspaces.value = workspaces.value.filter(w => w.id !== workspace.id)
   } catch (error) {
     console.error('Error deleting workspace:', error)
     alert(`Failed to delete workspace: ${error.response?.data?.error || error.message}`)
+  } finally {
+    deletingId.value = null
   }
 }
 
@@ -448,5 +484,100 @@ onMounted(() => {
   text-align: center;
   padding: 3rem;
   color: var(--text-secondary);
+}
+
+/* Loading State */
+.loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4rem 2rem;
+  gap: 1rem;
+}
+
+.loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.loading-text {
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+}
+
+/* Error State */
+.error-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4rem 2rem;
+  gap: 0.75rem;
+}
+
+.error-text {
+  color: #f87171;
+  font-size: 1.1rem;
+  font-weight: 500;
+  margin: 0;
+}
+
+.error-detail {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.retry-btn {
+  margin-top: 0.5rem;
+  padding: 0.5rem 1.5rem;
+  background: var(--accent);
+  color: var(--bg-primary);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: opacity 0.2s;
+}
+
+.retry-btn:hover {
+  opacity: 0.9;
+}
+
+/* Button Spinner */
+.btn-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  margin-right: 0.4rem;
+  vertical-align: middle;
+}
+
+.btn-spinner.small {
+  width: 12px;
+  height: 12px;
+  border-width: 1.5px;
+  border-color: var(--text-secondary);
+  border-top-color: var(--accent);
+  margin: 0;
+}
+
+/* Deleting State */
+.workspace-card.deleting {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 </style>

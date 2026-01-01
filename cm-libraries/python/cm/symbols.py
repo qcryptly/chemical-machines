@@ -10,8 +10,18 @@ Notation Styles:
     - braket: Dirac bra-ket notation for quantum mechanics
     - engineering: Engineering notation (j for imaginary, etc.)
 
+Slater Determinants:
+    The module provides SlaterState for representing many-electron wavefunctions
+    as Slater determinants using a simple 1D list of occupied spin-orbitals.
+
+    Symmetry classes for automatic term zeroing:
+    - Symmetry.NONE: Keep all terms
+    - Symmetry.SPIN: α/β spin orthogonality
+    - Symmetry.SPATIAL: Different spatial orbitals orthogonal
+    - Symmetry.ORTHONORMAL: Full orthonormality ⟨φᵢ|φⱼ⟩ = δᵢⱼ
+
 Usage:
-    from cm.symbols import latex, Math, set_notation
+    from cm.symbols import latex, Math, set_notation, SlaterState, SpinOrbital, Symmetry
 
     # Simple LaTeX rendering
     latex(r"E = mc^2")
@@ -30,10 +40,300 @@ Usage:
     m = Math()
     m.bra("psi").ket("phi")
     m.render()
+
+    # Slater determinants with 1D state vector
+    state = SlaterState.from_labels(["1s↑", "1s↓", "2s↑"])
+    m = Math()
+    m.slater_bra_state(state)  # ⟨1s↑, 1s↓, 2s↑|
+    m.render()
+
+    # Inner products with symmetry-based simplification
+    psi = SlaterState.from_labels(["1s↑", "1s↓"])
+    phi = SlaterState.from_labels(["1s↑", "2s↑"])
+    m = Math()
+    m.slater_overlap(psi, phi)  # Renders: 0 (orthogonal)
+    m.render()
+
+    # Slater-Condon rules
+    m = Math()
+    m.slater_condon_rule(psi, phi, operator_type="one_electron")
+    m.render()
 """
 
-from typing import Optional, List, Union
+from typing import Optional, List, Union, Dict, Set, Tuple, Callable
+from dataclasses import dataclass, field
+from enum import Enum
 from . import views
+
+
+class Symmetry(Enum):
+    """Symmetry types for spin-orbital basis functions."""
+    NONE = "none"           # No symmetry (keep all terms)
+    SPIN = "spin"           # Spin symmetry (α/β orthogonal)
+    SPATIAL = "spatial"     # Spatial symmetry (different spatial orbitals orthogonal)
+    ORTHONORMAL = "orthonormal"  # Full orthonormality (⟨φᵢ|φⱼ⟩ = δᵢⱼ)
+
+
+@dataclass
+class SpinOrbital:
+    """
+    Represents a spin-orbital: a spatial orbital combined with spin.
+
+    Attributes:
+        label: Orbital label (e.g., "1s", "2p", "φ₁")
+        spin: Spin state ("α", "β", "↑", "↓", or None for spinless)
+        spatial_quantum_numbers: Optional dict of quantum numbers (n, l, m, etc.)
+        symmetry_group: Optional symmetry group label for point group symmetry
+    """
+    label: str
+    spin: Optional[str] = None
+    spatial_quantum_numbers: Optional[Dict[str, int]] = None
+    symmetry_group: Optional[str] = None
+
+    def __post_init__(self):
+        # Normalize spin notation
+        if self.spin in ("↑", "up", "alpha"):
+            self.spin = "α"
+        elif self.spin in ("↓", "down", "beta"):
+            self.spin = "β"
+
+    @property
+    def full_label(self) -> str:
+        """Return full label including spin if present."""
+        if self.spin:
+            spin_symbol = "↑" if self.spin == "α" else "↓"
+            return f"{self.label}{spin_symbol}"
+        return self.label
+
+    @property
+    def latex_label(self) -> str:
+        """Return LaTeX-formatted label."""
+        if self.spin:
+            spin_symbol = r"\uparrow" if self.spin == "α" else r"\downarrow"
+            return f"{self.label}_{{{spin_symbol}}}"
+        return self.label
+
+    def is_orthogonal_to(self, other: "SpinOrbital", symmetry: Symmetry) -> bool:
+        """
+        Check if this orbital is orthogonal to another under given symmetry.
+
+        Args:
+            other: Another SpinOrbital
+            symmetry: Symmetry type to apply
+
+        Returns:
+            True if orbitals are orthogonal, False otherwise
+        """
+        if symmetry == Symmetry.NONE:
+            return False
+
+        if symmetry == Symmetry.SPIN:
+            # Different spins are orthogonal
+            if self.spin and other.spin and self.spin != other.spin:
+                return True
+            return False
+
+        if symmetry == Symmetry.SPATIAL:
+            # Different spatial orbitals are orthogonal
+            if self.label != other.label:
+                return True
+            return False
+
+        if symmetry == Symmetry.ORTHONORMAL:
+            # Full orthonormality: both spin and spatial must match
+            return self.label != other.label or self.spin != other.spin
+
+        return False
+
+    def __eq__(self, other):
+        if isinstance(other, SpinOrbital):
+            return self.label == other.label and self.spin == other.spin
+        return False
+
+    def __hash__(self):
+        return hash((self.label, self.spin))
+
+    def __str__(self):
+        return self.full_label
+
+
+@dataclass
+class SlaterState:
+    """
+    Represents a Slater determinant state as a list of occupied spin-orbitals.
+
+    This is the primary interface for working with Slater determinants.
+    Instead of specifying a full matrix, you provide a 1D list of occupied
+    orbitals, and the class handles the determinant structure automatically.
+
+    The electron coordinates are implicitly coupled with the spin-orbitals:
+    electron 1 is associated with the first orbital, electron 2 with the second, etc.
+
+    Attributes:
+        orbitals: List of occupied spin-orbitals
+        symmetry: Symmetry type for orthogonality rules
+        basis_name: Optional name for the basis set
+
+    Example:
+        # Create a 3-electron state
+        state = SlaterState.from_labels(["1s↑", "1s↓", "2s↑"])
+
+        # Or with explicit SpinOrbital objects
+        orbs = [SpinOrbital("1s", "α"), SpinOrbital("1s", "β"), SpinOrbital("2s", "α")]
+        state = SlaterState(orbs, symmetry=Symmetry.ORTHONORMAL)
+
+        # Use with Math class
+        m = Math()
+        m.slater_bra(state)  # ⟨1s↑, 1s↓, 2s↑|
+    """
+    orbitals: List[SpinOrbital]
+    symmetry: Symmetry = Symmetry.ORTHONORMAL
+    basis_name: Optional[str] = None
+
+    @classmethod
+    def from_labels(cls, labels: List[str], symmetry: Symmetry = Symmetry.ORTHONORMAL,
+                    basis_name: Optional[str] = None) -> "SlaterState":
+        """
+        Create a SlaterState from string labels.
+
+        Parses spin notation from labels:
+        - "1s↑" or "1sα" or "1s_up" -> SpinOrbital("1s", "α")
+        - "2p↓" or "2pβ" or "2p_down" -> SpinOrbital("2p", "β")
+        - "φ1" -> SpinOrbital("φ1", None) (no spin)
+
+        Args:
+            labels: List of orbital labels with optional spin notation
+            symmetry: Symmetry type for orthogonality rules
+            basis_name: Optional name for the basis set
+        """
+        orbitals = []
+        for label in labels:
+            # Parse spin from label
+            spin = None
+            base_label = label
+
+            for spin_marker, spin_val in [
+                ("↑", "α"), ("↓", "β"),
+                ("α", "α"), ("β", "β"),
+                ("_up", "α"), ("_down", "β"),
+                ("_alpha", "α"), ("_beta", "β"),
+            ]:
+                if spin_marker in label:
+                    spin = spin_val
+                    base_label = label.replace(spin_marker, "")
+                    break
+
+            orbitals.append(SpinOrbital(base_label, spin))
+
+        return cls(orbitals, symmetry, basis_name)
+
+    @classmethod
+    def from_occupation(cls, occupation: Dict[str, int],
+                        symmetry: Symmetry = Symmetry.ORTHONORMAL) -> "SlaterState":
+        """
+        Create a SlaterState from occupation numbers.
+
+        Args:
+            occupation: Dict mapping orbital labels to occupation (0, 1, or 2)
+            symmetry: Symmetry type
+
+        Example:
+            state = SlaterState.from_occupation({"1s": 2, "2s": 1})
+            # Creates: |1s↑, 1s↓, 2s↑⟩
+        """
+        orbitals = []
+        for label, n in occupation.items():
+            if n >= 1:
+                orbitals.append(SpinOrbital(label, "α"))
+            if n >= 2:
+                orbitals.append(SpinOrbital(label, "β"))
+        return cls(orbitals, symmetry)
+
+    @property
+    def n_electrons(self) -> int:
+        """Number of electrons in this state."""
+        return len(self.orbitals)
+
+    @property
+    def labels(self) -> List[str]:
+        """List of full orbital labels."""
+        return [orb.full_label for orb in self.orbitals]
+
+    @property
+    def latex_labels(self) -> List[str]:
+        """List of LaTeX-formatted orbital labels."""
+        return [orb.latex_label for orb in self.orbitals]
+
+    def overlap_with(self, other: "SlaterState") -> Tuple[bool, Optional[int]]:
+        """
+        Compute overlap with another Slater state under current symmetry.
+
+        For orthonormal orbitals:
+        - ⟨Ψ|Φ⟩ = 0 if different occupied orbitals
+        - ⟨Ψ|Φ⟩ = (-1)^P if same orbitals (P = permutation parity)
+
+        Returns:
+            (is_nonzero, sign) where sign is +1, -1, or None if zero
+        """
+        if self.n_electrons != other.n_electrons:
+            return (False, None)
+
+        if self.symmetry == Symmetry.NONE:
+            return (True, None)  # Can't determine without explicit computation
+
+        # Check if same set of orbitals (for orthonormal case)
+        if self.symmetry == Symmetry.ORTHONORMAL:
+            self_set = set(self.orbitals)
+            other_set = set(other.orbitals)
+
+            if self_set != other_set:
+                return (False, None)
+
+            # Compute permutation parity
+            # Find the permutation that maps other's order to self's order
+            parity = self._compute_permutation_parity(other)
+            return (True, parity)
+
+        return (True, None)
+
+    def _compute_permutation_parity(self, other: "SlaterState") -> int:
+        """Compute the parity of permutation between two states with same orbitals."""
+        # Build index map
+        other_indices = {orb: i for i, orb in enumerate(other.orbitals)}
+        perm = [other_indices[orb] for orb in self.orbitals]
+
+        # Count inversions
+        inversions = 0
+        n = len(perm)
+        for i in range(n):
+            for j in range(i + 1, n):
+                if perm[i] > perm[j]:
+                    inversions += 1
+
+        return 1 if inversions % 2 == 0 else -1
+
+    def to_matrix(self) -> List[List[str]]:
+        """
+        Convert to symbolic matrix representation for determinant expansion.
+
+        Returns n×n matrix where element [i][j] represents orbital j evaluated
+        at electron i's coordinates: φⱼ(rᵢ)
+        """
+        n = self.n_electrons
+        matrix = []
+        for i in range(n):
+            row = []
+            for j, orb in enumerate(self.orbitals):
+                # Element represents φⱼ(rᵢ) - orbital j at electron i's position
+                row.append(orb.latex_label)
+            matrix.append(row)
+        return matrix
+
+    def __str__(self):
+        return f"|{', '.join(self.labels)}⟩"
+
+    def __repr__(self):
+        return f"SlaterState({self.labels}, symmetry={self.symmetry.value})"
 
 # Current notation style
 _notation_style = "standard"
@@ -207,6 +507,31 @@ def equation(expression: str, number: Optional[Union[int, str]] = None):
     views.html(html_content)
 
 
+def _render_scrollable(expression: str, display: bool = True, label: Optional[str] = None,
+                       justify: str = "center"):
+    """
+    Render a LaTeX expression in a scrollable container for long equations.
+
+    This wraps the math output in a div with horizontal scrolling enabled,
+    useful for very long equations that would otherwise overflow.
+    """
+    if display:
+        delim_start, delim_end = r"\[", r"\]"
+    else:
+        delim_start, delim_end = r"\(", r"\)"
+
+    justify_class = f"cm-math-{justify}" if justify in ("left", "center", "right") else "cm-math-center"
+    line_height_style = _get_line_height_style()
+
+    # Wrap in scrollable container
+    html_content = f'<div class="cm-math-scroll"><div class="cm-math {justify_class}"{line_height_style}>{delim_start}{expression}{delim_end}</div></div>'
+
+    if label:
+        html_content = f'<div class="cm-math-labeled"{line_height_style}><span class="cm-math-label">{label}</span>{html_content}</div>'
+
+    views.html(html_content)
+
+
 def align(*equations: str):
     """
     Render aligned equations (useful for multi-step derivations).
@@ -330,13 +655,53 @@ class Math:
         m = Math()
         m.bra("psi").ket("phi")
         m.render()
+
+        # Operator overloads for inner products
+        m_g = Math()
+        m_g.determinant_bra(sm_g).equals().bra('\\phi_1')
+
+        m_1 = Math()
+        m_1.determinant_ket(sm_1).equals().ket('\\phi_2')
+
+        m_s = m_g @ m_1  # Inner product of both sides
+        m_s.render()
     """
 
     def __init__(self):
         self._parts: List[str] = []
+        # Track equation structure for operator overloads
+        self._lhs_parts: List[str] = []  # Left-hand side of equation
+        self._rhs_parts: List[str] = []  # Right-hand side of equation
+        self._has_equals: bool = False
+        # Track determinant matrices for inner product computation
+        self._lhs_det_matrix = None  # Determinant matrix on LHS
+        self._rhs_det_matrix = None  # Determinant matrix on RHS
+        self._lhs_det_type: str = None  # 'bra' or 'ket'
+        self._rhs_det_type: str = None  # 'bra' or 'ket'
+        # Track simple bra/ket labels
+        self._lhs_bra_label = None
+        self._rhs_bra_label = None
+        self._lhs_ket_label = None
+        self._rhs_ket_label = None
+        # Track if this is an operator (for matrix element notation)
+        self._is_operator: bool = False
+        self._lhs_operator_str: str = None  # Operator expression for LHS
+        self._rhs_operator_str: str = None  # Operator expression for RHS
+        # Track pending operator for chained @ operations (bra @ op @ ket)
+        self._pending_operator: "Math" = None
+        # Track SlaterState objects for inner products
+        self._lhs_slater_state: "SlaterState" = None
+        self._rhs_slater_state: "SlaterState" = None
+        self._lhs_slater_type: str = None  # 'bra' or 'ket'
+        self._rhs_slater_type: str = None  # 'bra' or 'ket'
 
     def _append(self, content: str) -> "Math":
         self._parts.append(content)
+        # Track LHS vs RHS for operator overloads
+        if self._has_equals:
+            self._rhs_parts.append(content)
+        else:
+            self._lhs_parts.append(content)
         return self
 
     def raw(self, latex: str) -> "Math":
@@ -368,6 +733,7 @@ class Math:
         return self._append(" \\div ")
 
     def equals(self) -> "Math":
+        self._has_equals = True
         return self._append(" = ")
 
     def approx(self) -> "Math":
@@ -517,14 +883,26 @@ class Math:
     # Quantum mechanics / Bra-ket
     def bra(self, content) -> "Math":
         """Add a bra <content|. Content can be a string or list of quantum numbers."""
+        original_content = content
         if isinstance(content, (list, tuple)):
             content = ", ".join(str(c) for c in content)
+        # Track for operator overloads
+        if self._has_equals:
+            self._rhs_bra_label = original_content
+        else:
+            self._lhs_bra_label = original_content
         return self._append(f"\\langle {content} |")
 
     def ket(self, content) -> "Math":
         """Add a ket |content>. Content can be a string or list of quantum numbers."""
+        original_content = content
         if isinstance(content, (list, tuple)):
             content = ", ".join(str(c) for c in content)
+        # Track for operator overloads
+        if self._has_equals:
+            self._rhs_ket_label = original_content
+        else:
+            self._lhs_ket_label = original_content
         return self._append(f"| {content} \\rangle")
 
     def braket(self, bra, ket) -> "Math":
@@ -661,6 +1039,15 @@ class Math:
             m.determinant_bra(y)
             m.render()
         """
+        import numpy as np
+        matrix = np.asarray(matrix)
+        # Track for operator overloads
+        if self._has_equals:
+            self._rhs_det_matrix = matrix
+            self._rhs_det_type = 'bra'
+        else:
+            self._lhs_det_matrix = matrix
+            self._lhs_det_type = 'bra'
         terms = self._symbolic_determinant(matrix)
         return self._render_symbolic_terms(terms, 'bra')
 
@@ -680,6 +1067,15 @@ class Math:
             m.determinant_ket(y)
             m.render()
         """
+        import numpy as np
+        matrix = np.asarray(matrix)
+        # Track for operator overloads
+        if self._has_equals:
+            self._rhs_det_matrix = matrix
+            self._rhs_det_type = 'ket'
+        else:
+            self._lhs_det_matrix = matrix
+            self._lhs_det_type = 'ket'
         terms = self._symbolic_determinant(matrix)
         return self._render_symbolic_terms(terms, 'ket')
 
@@ -839,6 +1235,218 @@ class Math:
             self._append(f"\\frac{{1}}{{\\sqrt{{{n}!}}}}")
 
         self.ket(orbitals)
+        return self
+
+    def slater_bra_state(self, state: "SlaterState", normalize: bool = False) -> "Math":
+        """
+        Render a SlaterState as a bra ⟨orbitals|.
+
+        This method works with the new SlaterState class that represents
+        a Slater determinant as a 1D list of occupied spin-orbitals.
+
+        Args:
+            state: SlaterState object
+            normalize: Include normalization factor 1/√n!
+
+        Example:
+            state = SlaterState.from_labels(["1s↑", "1s↓", "2s↑"])
+            m = Math()
+            m.slater_bra_state(state)
+            m.render()
+            # Renders: ⟨1s↑, 1s↓, 2s↑|
+        """
+        n = state.n_electrons
+
+        if normalize:
+            self._append(f"\\frac{{1}}{{\\sqrt{{{n}!}}}}")
+
+        # Track the SlaterState for operator overloads
+        if self._has_equals:
+            self._rhs_slater_state = state
+            self._rhs_slater_type = 'bra'
+        else:
+            self._lhs_slater_state = state
+            self._lhs_slater_type = 'bra'
+
+        self.bra(state.latex_labels)
+        return self
+
+    def slater_ket_state(self, state: "SlaterState", normalize: bool = False) -> "Math":
+        """
+        Render a SlaterState as a ket |orbitals⟩.
+
+        This method works with the new SlaterState class that represents
+        a Slater determinant as a 1D list of occupied spin-orbitals.
+
+        Args:
+            state: SlaterState object
+            normalize: Include normalization factor 1/√n!
+
+        Example:
+            state = SlaterState.from_labels(["1s↑", "1s↓", "2s↑"])
+            m = Math()
+            m.slater_ket_state(state)
+            m.render()
+            # Renders: |1s↑, 1s↓, 2s↑⟩
+        """
+        n = state.n_electrons
+
+        if normalize:
+            self._append(f"\\frac{{1}}{{\\sqrt{{{n}!}}}}")
+
+        # Track the SlaterState for operator overloads
+        if self._has_equals:
+            self._rhs_slater_state = state
+            self._rhs_slater_type = 'ket'
+        else:
+            self._lhs_slater_state = state
+            self._lhs_slater_type = 'ket'
+
+        self.ket(state.latex_labels)
+        return self
+
+    def slater_matrix_element(self, bra_state: "SlaterState", operator: str,
+                               ket_state: "SlaterState",
+                               apply_symmetry: bool = True) -> "Math":
+        """
+        Render a matrix element ⟨bra|op|ket⟩ between two SlaterStates.
+
+        When apply_symmetry is True and states have orthonormal symmetry,
+        uses Slater-Condon rules to simplify:
+        - If states differ by more than 2 orbitals: result is 0
+        - If states are identical: sum of one-electron terms + two-electron terms
+        - If states differ by 1 orbital: one-electron + two-electron terms
+        - If states differ by 2 orbitals: only two-electron terms
+
+        Args:
+            bra_state: SlaterState for bra
+            operator: LaTeX string for operator (e.g., "\\hat{H}")
+            ket_state: SlaterState for ket
+            apply_symmetry: Use symmetry to simplify (default True)
+
+        Example:
+            psi = SlaterState.from_labels(["1s↑", "1s↓"])
+            phi = SlaterState.from_labels(["1s↑", "2s↑"])
+            m = Math()
+            m.slater_matrix_element(psi, "\\hat{H}", phi)
+            m.render()
+        """
+        # Render the full matrix element notation
+        bra_str = ", ".join(bra_state.latex_labels)
+        ket_str = ", ".join(ket_state.latex_labels)
+        self._append(f"\\langle {bra_str} | {operator} | {ket_str} \\rangle")
+
+        return self
+
+    def slater_overlap(self, bra_state: "SlaterState", ket_state: "SlaterState",
+                        simplify: bool = True) -> "Math":
+        """
+        Render and optionally simplify the overlap ⟨bra|ket⟩ between two SlaterStates.
+
+        When simplify is True and states have orthonormal symmetry:
+        - Returns 0 if different sets of orbitals
+        - Returns ±1 based on permutation parity if same orbitals
+
+        Args:
+            bra_state: SlaterState for bra
+            ket_state: SlaterState for ket
+            simplify: Apply symmetry simplifications (default True)
+
+        Example:
+            psi = SlaterState.from_labels(["1s↑", "1s↓", "2s↑"])
+            phi = SlaterState.from_labels(["1s↑", "1s↓", "2s↑"])
+            m = Math()
+            m.slater_overlap(psi, phi)
+            m.render()
+            # Renders: 1 (same orbitals)
+        """
+        if simplify and bra_state.symmetry == Symmetry.ORTHONORMAL:
+            is_nonzero, sign = bra_state.overlap_with(ket_state)
+
+            if not is_nonzero:
+                self._append("0")
+            elif sign is not None:
+                self._append(str(sign))
+            else:
+                # Render full overlap
+                bra_str = ", ".join(bra_state.latex_labels)
+                ket_str = ", ".join(ket_state.latex_labels)
+                self._append(f"\\langle {bra_str} | {ket_str} \\rangle")
+        else:
+            # Render without simplification
+            bra_str = ", ".join(bra_state.latex_labels)
+            ket_str = ", ".join(ket_state.latex_labels)
+            self._append(f"\\langle {bra_str} | {ket_str} \\rangle")
+
+        return self
+
+    def slater_condon_rule(self, bra_state: "SlaterState", ket_state: "SlaterState",
+                           operator_type: str = "one_electron") -> "Math":
+        """
+        Apply Slater-Condon rules to determine which terms survive.
+
+        This analyzes the difference between two Slater states and renders
+        the appropriate Slater-Condon expression.
+
+        Args:
+            bra_state: SlaterState for bra
+            ket_state: SlaterState for ket
+            operator_type: "one_electron" for ĥ(i), "two_electron" for ĝ(i,j)
+
+        Returns:
+            Math object with the Slater-Condon expression
+        """
+        bra_set = set(bra_state.orbitals)
+        ket_set = set(ket_state.orbitals)
+
+        # Find differing orbitals
+        only_in_bra = bra_set - ket_set
+        only_in_ket = ket_set - bra_set
+        n_diff = len(only_in_bra)
+
+        if n_diff > 2:
+            # More than 2 orbitals differ: matrix element is zero
+            self._append("0")
+            return self
+
+        if n_diff == 0:
+            # Same orbitals (diagonal case)
+            if operator_type == "one_electron":
+                # Sum over all occupied orbitals
+                self._append("\\sum_i ")
+                self._append("\\langle i | \\hat{h} | i \\rangle")
+            else:
+                # Two-electron: sum over pairs
+                self._append("\\frac{1}{2} \\sum_{i \\neq j} ")
+                self._append("\\left[ \\langle ij | \\hat{g} | ij \\rangle - \\langle ij | \\hat{g} | ji \\rangle \\right]")
+
+        elif n_diff == 1:
+            # Single excitation
+            orb_bra = list(only_in_bra)[0]
+            orb_ket = list(only_in_ket)[0]
+
+            if operator_type == "one_electron":
+                self._append(f"\\langle {orb_bra.latex_label} | \\hat{{h}} | {orb_ket.latex_label} \\rangle")
+            else:
+                # Two-electron with common orbitals
+                common = bra_set & ket_set
+                self._append("\\sum_j ")
+                self._append(f"\\left[ \\langle {orb_bra.latex_label} j | \\hat{{g}} | {orb_ket.latex_label} j \\rangle ")
+                self._append(f"- \\langle {orb_bra.latex_label} j | \\hat{{g}} | j {orb_ket.latex_label} \\rangle \\right]")
+
+        else:  # n_diff == 2
+            # Double excitation - only two-electron operator contributes
+            if operator_type == "one_electron":
+                self._append("0")
+            else:
+                orbs_bra = list(only_in_bra)
+                orbs_ket = list(only_in_ket)
+                b1, b2 = orbs_bra[0].latex_label, orbs_bra[1].latex_label
+                k1, k2 = orbs_ket[0].latex_label, orbs_ket[1].latex_label
+
+                self._append(f"\\langle {b1} {b2} | \\hat{{g}} | {k1} {k2} \\rangle ")
+                self._append(f"- \\langle {b1} {b2} | \\hat{{g}} | {k2} {k1} \\rangle")
+
         return self
 
     # Inner Products of Determinants
@@ -1127,15 +1735,51 @@ class Math:
     def qquad(self) -> "Math":
         return self._append("\\qquad")
 
+    # Line breaks for multi-line equations
+    def newline(self) -> "Math":
+        """Add a line break (\\\\) for use in aligned environments."""
+        return self._append(" \\\\ ")
+
+    def br(self) -> "Math":
+        """Alias for newline() - add a line break."""
+        return self.newline()
+
+    def align_eq(self) -> "Math":
+        """Add alignment marker (&) followed by equals sign for aligned environments."""
+        return self._append(" &= ")
+
+    def align_mark(self) -> "Math":
+        """Add alignment marker (&) for aligned environments."""
+        return self._append(" & ")
+
     # Build and render
     def build(self) -> str:
         """Build and return the LaTeX string."""
         return "".join(self._parts)
 
     def render(self, display: bool = True, label: Optional[str] = None,
-               justify: str = "center"):
-        """Render the built expression to HTML output."""
-        latex(self.build(), display=display, label=label, justify=justify)
+               justify: str = "center", multiline: bool = False, scrollable: bool = False):
+        """
+        Render the built expression to HTML output.
+
+        Args:
+            display: If True, render as display math (block). If False, inline.
+            label: Optional label/caption for the expression.
+            justify: Alignment - 'left', 'center', or 'right'.
+            multiline: If True, wrap in aligned environment for line breaks.
+            scrollable: If True, wrap in scrollable container for long equations.
+        """
+        expr = self.build()
+
+        # Wrap in aligned environment for multi-line equations
+        if multiline or " \\\\ " in expr:
+            expr = f"\\begin{{aligned}} {expr} \\end{{aligned}}"
+
+        # Use scrollable container if requested
+        if scrollable:
+            _render_scrollable(expr, display=display, label=label, justify=justify)
+        else:
+            latex(expr, display=display, label=label, justify=justify)
 
     def clear(self) -> "Math":
         """Clear the builder."""
@@ -1144,6 +1788,467 @@ class Math:
 
     def __str__(self) -> str:
         return self.build()
+
+    # Operator overloads for inner products
+    def __matmul__(self, other: "Math") -> "Math":
+        """
+        Matrix multiplication operator (@) for computing inner products.
+
+        When two Math objects are combined with @, it computes the inner product
+        of both the LHS and RHS of their equations separately.
+
+        For bra @ ket operations:
+        - LHS: ⟨bra_lhs| @ |ket_lhs⟩ = ⟨bra_lhs|ket_lhs⟩
+        - RHS: ⟨bra_rhs| @ |ket_rhs⟩ = ⟨bra_rhs|ket_rhs⟩
+
+        For bra @ op @ ket operations (matrix elements):
+        - LHS: ⟨bra_lhs|op_lhs|ket_lhs⟩
+        - RHS: ⟨bra_rhs|op_rhs|ket_rhs⟩
+
+        Example:
+            m_g = Math()
+            m_g.determinant_bra(sm_g).equals().bra('\\phi_1')
+
+            m_1 = Math()
+            m_1.determinant_ket(sm_1).equals().ket('\\phi_2')
+
+            m_s = m_g @ m_1  # Inner product of both sides
+            m_s.render()
+
+            # With operator:
+            my_op = Math().var("h")
+            m_o = m_g @ my_op @ m_1  # Matrix element ⟨...|h|...⟩
+            m_o.render()
+        """
+        if not isinstance(other, Math):
+            raise TypeError(f"unsupported operand type(s) for @: 'Math' and '{type(other).__name__}'")
+
+        # Check what kind of objects we're dealing with
+        self_is_bra = (self._lhs_det_type == 'bra' or self._lhs_bra_label is not None or
+                       self._lhs_slater_type == 'bra')
+        self_has_pending_op = self._pending_operator is not None
+        other_is_ket = (other._lhs_det_type == 'ket' or other._lhs_ket_label is not None or
+                        other._lhs_slater_type == 'ket')
+        other_is_bra = (other._lhs_det_type == 'bra' or other._lhs_bra_label is not None or
+                        other._lhs_slater_type == 'bra')
+
+        # Case 1: bra @ op (store operator for later, return intermediate result)
+        # The "other" is an operator (not a bra or ket)
+        if self_is_bra and not other_is_ket and not other_is_bra:
+            result = Math()
+            # Copy bra information to result
+            result._lhs_det_matrix = self._lhs_det_matrix
+            result._lhs_det_type = self._lhs_det_type
+            result._lhs_bra_label = self._lhs_bra_label
+            result._rhs_det_matrix = self._rhs_det_matrix
+            result._rhs_det_type = self._rhs_det_type
+            result._rhs_bra_label = self._rhs_bra_label
+            result._has_equals = self._has_equals
+            # Copy SlaterState info
+            result._lhs_slater_state = self._lhs_slater_state
+            result._lhs_slater_type = self._lhs_slater_type
+            result._rhs_slater_state = self._rhs_slater_state
+            result._rhs_slater_type = self._rhs_slater_type
+            # Store operator for when we encounter the ket
+            result._pending_operator = other
+            return result
+
+        # Case 2: (bra @ op) @ ket - we have a pending operator
+        if self_has_pending_op and other_is_ket:
+            result = Math()
+            op = self._pending_operator
+
+            # Get operator strings for LHS and RHS
+            # If operator doesn't have equals, use same expression for both sides
+            lhs_op_str = "".join(op._lhs_parts) if op._lhs_parts else op.build()
+            if op._has_equals:
+                rhs_op_str = "".join(op._rhs_parts) if op._rhs_parts else op.build()
+            else:
+                rhs_op_str = lhs_op_str
+
+            # Compute LHS matrix element
+            lhs_computed = self._compute_side_matrix_element(
+                self._lhs_det_matrix, self._lhs_det_type, self._lhs_bra_label,
+                lhs_op_str,
+                other._lhs_det_matrix, other._lhs_det_type, other._lhs_ket_label
+            )
+            result._append(lhs_computed)
+
+            # If both have equations, compute RHS matrix element
+            if self._has_equals and other._has_equals:
+                result._has_equals = True
+                result._append(" = ")
+
+                rhs_computed = self._compute_side_matrix_element(
+                    self._rhs_det_matrix, self._rhs_det_type, self._rhs_bra_label,
+                    rhs_op_str,
+                    other._rhs_det_matrix, other._rhs_det_type, other._rhs_ket_label
+                )
+                result._append(rhs_computed)
+            elif self._has_equals or other._has_equals:
+                # One has equals - use operator's expression for RHS
+                result._has_equals = True
+                result._append(" = ")
+
+                # Use RHS if available, otherwise LHS
+                bra_matrix = self._rhs_det_matrix if self._has_equals else self._lhs_det_matrix
+                bra_type = self._rhs_det_type if self._has_equals else self._lhs_det_type
+                bra_label = self._rhs_bra_label if self._has_equals else self._lhs_bra_label
+                ket_matrix = other._rhs_det_matrix if other._has_equals else other._lhs_det_matrix
+                ket_type = other._rhs_det_type if other._has_equals else other._lhs_det_type
+                ket_label = other._rhs_ket_label if other._has_equals else other._lhs_ket_label
+
+                rhs_computed = self._compute_side_matrix_element(
+                    bra_matrix, bra_type, bra_label,
+                    rhs_op_str,
+                    ket_matrix, ket_type, ket_label
+                )
+                result._append(rhs_computed)
+
+            return result
+
+        # Case 3: Simple bra @ ket (no operator)
+        if self_is_bra and other_is_ket:
+            result = Math()
+
+            # Check if we're using SlaterState objects
+            if self._lhs_slater_state is not None and other._lhs_slater_state is not None:
+                # Use SlaterState-aware inner product
+                lhs_computed = self._compute_slater_inner_product(
+                    self._lhs_slater_state, other._lhs_slater_state
+                )
+                result._append(lhs_computed)
+
+                # If both have equations, compute RHS inner product
+                if self._has_equals and other._has_equals:
+                    result._has_equals = True
+                    result._append(" = ")
+
+                    rhs_computed = self._compute_slater_inner_product(
+                        self._rhs_slater_state, other._rhs_slater_state
+                    )
+                    result._append(rhs_computed)
+            else:
+                # Fall back to original matrix-based inner product
+                lhs_computed = self._compute_side_inner_product(
+                    self._lhs_det_matrix, self._lhs_det_type, self._lhs_bra_label, self._lhs_ket_label,
+                    other._lhs_det_matrix, other._lhs_det_type, other._lhs_bra_label, other._lhs_ket_label
+                )
+                result._append(lhs_computed)
+
+                # If both have equations, compute RHS inner product
+                if self._has_equals and other._has_equals:
+                    result._has_equals = True
+                    result._append(" = ")
+
+                    rhs_computed = self._compute_side_inner_product(
+                        self._rhs_det_matrix, self._rhs_det_type, self._rhs_bra_label, self._rhs_ket_label,
+                        other._rhs_det_matrix, other._rhs_det_type, other._rhs_bra_label, other._rhs_ket_label
+                    )
+                    result._append(rhs_computed)
+
+            return result
+
+        # Invalid combination
+        if not self_is_bra and not self_has_pending_op:
+            raise ValueError("Left operand of @ must contain bra notation (use determinant_bra or bra)")
+        raise ValueError("Right operand of @ must contain ket notation or be an operator expression")
+
+    def _compute_slater_inner_product(self, bra_state: "SlaterState",
+                                       ket_state: "SlaterState") -> str:
+        """
+        Compute the inner product ⟨bra|ket⟩ between two SlaterState objects.
+
+        Uses the symmetry settings on the bra_state to determine simplification.
+        For orthonormal states, applies Kronecker delta rules.
+        """
+        if bra_state.symmetry == Symmetry.ORTHONORMAL:
+            is_nonzero, sign = bra_state.overlap_with(ket_state)
+
+            if not is_nonzero:
+                return "0"
+            elif sign is not None:
+                return str(sign)
+
+        # Render full overlap notation
+        bra_str = ", ".join(bra_state.latex_labels)
+        ket_str = ", ".join(ket_state.latex_labels)
+        return f"\\langle {bra_str} | {ket_str} \\rangle"
+
+    def _compute_side_inner_product(self, bra_matrix, bra_det_type, bra_label, bra_ket_label,
+                                     ket_matrix, ket_det_type, ket_bra_label, ket_label) -> str:
+        """
+        Compute the inner product for one side (LHS or RHS) of the equation.
+
+        Handles combinations of:
+        - determinant_bra @ determinant_ket -> combined braket notation ⟨a,b,c|d,e,f⟩
+        - bra @ ket -> simple braket
+        - determinant_bra @ ket -> simplified notation
+        - bra @ determinant_ket -> simplified notation
+        """
+        import numpy as np
+
+        # Case 1: Both are determinants
+        if bra_matrix is not None and ket_matrix is not None:
+            if bra_det_type != 'bra':
+                raise ValueError("Left side must be bra notation for inner product")
+            if ket_det_type != 'ket':
+                raise ValueError("Right side must be ket notation for inner product")
+
+            # Check shape compatibility
+            bra_shape = np.asarray(bra_matrix).shape
+            ket_shape = np.asarray(ket_matrix).shape
+            if bra_shape != ket_shape:
+                raise ValueError(f"Shape mismatch: bra has shape {bra_shape}, ket has shape {ket_shape}")
+
+            # Compute inner product terms
+            bra_terms = self._symbolic_determinant(bra_matrix)
+            ket_terms = self._symbolic_determinant(ket_matrix)
+            inner_terms = self._compute_inner_product_terms(bra_terms, ket_terms, orthogonal=False)
+
+            # Build result string using combined braket notation ⟨a,b,c|d,e,f⟩
+            parts = []
+            first = True
+            for sign, bra_elems, ket_elems in inner_terms:
+                if sign > 0:
+                    if not first:
+                        parts.append(" + ")
+                else:
+                    parts.append(" - ")
+                first = False
+
+                # Combined braket: ⟨bra_elements|ket_elements⟩
+                bra_str = ", ".join(str(b) for b in bra_elems)
+                ket_str = ", ".join(str(k) for k in ket_elems)
+                parts.append(f"\\langle {bra_str} | {ket_str} \\rangle")
+
+            return "".join(parts) if parts else "0"
+
+        # Case 2: Simple bra @ simple ket
+        elif bra_label is not None and ket_label is not None:
+            bra_str = bra_label
+            ket_str = ket_label
+            if isinstance(bra_str, (list, tuple)):
+                bra_str = ", ".join(str(c) for c in bra_str)
+            if isinstance(ket_str, (list, tuple)):
+                ket_str = ", ".join(str(c) for c in ket_str)
+            return f"\\langle {bra_str} | {ket_str} \\rangle"
+
+        # Case 3: determinant_bra @ simple ket
+        elif bra_matrix is not None and ket_label is not None:
+            ket_str = ket_label
+            if isinstance(ket_str, (list, tuple)):
+                ket_str = ", ".join(str(c) for c in ket_str)
+
+            # Render determinant bra terms contracted with ket
+            bra_terms = self._symbolic_determinant(bra_matrix)
+            parts = []
+            first = True
+            for sign, elements in bra_terms:
+                if sign > 0:
+                    if not first:
+                        parts.append(" + ")
+                else:
+                    parts.append(" - ")
+                first = False
+                elem_str = ", ".join(str(e) for e in elements)
+                parts.append(f"\\langle {elem_str} | {ket_str} \\rangle")
+
+            return "".join(parts)
+
+        # Case 4: simple bra @ determinant_ket
+        elif bra_label is not None and ket_matrix is not None:
+            bra_str = bra_label
+            if isinstance(bra_str, (list, tuple)):
+                bra_str = ", ".join(str(c) for c in bra_str)
+
+            # Render bra contracted with determinant ket terms
+            ket_terms = self._symbolic_determinant(ket_matrix)
+            parts = []
+            first = True
+            for sign, elements in ket_terms:
+                if sign > 0:
+                    if not first:
+                        parts.append(" + ")
+                else:
+                    parts.append(" - ")
+                first = False
+                elem_str = ", ".join(str(e) for e in elements)
+                parts.append(f"\\langle {bra_str} | {elem_str} \\rangle")
+
+            return "".join(parts)
+
+        else:
+            raise ValueError("Cannot compute inner product: incompatible operands")
+
+    def _compute_side_matrix_element(self, bra_matrix, bra_det_type, bra_label,
+                                      operator_str: str,
+                                      ket_matrix, ket_det_type, ket_label) -> str:
+        """
+        Compute the matrix element ⟨bra|op|ket⟩ for one side of the equation.
+
+        Handles combinations of:
+        - determinant_bra @ op @ determinant_ket -> ⟨a,b,c|op|d,e,f⟩ terms
+        - bra @ op @ ket -> simple ⟨bra|op|ket⟩
+        - determinant_bra @ op @ ket -> determinant terms with operator
+        - bra @ op @ determinant_ket -> bra with determinant ket terms
+        """
+        import numpy as np
+
+        # Case 1: Both are determinants
+        if bra_matrix is not None and ket_matrix is not None:
+            if bra_det_type != 'bra':
+                raise ValueError("Left side must be bra notation for matrix element")
+            if ket_det_type != 'ket':
+                raise ValueError("Right side must be ket notation for matrix element")
+
+            # Check shape compatibility
+            bra_shape = np.asarray(bra_matrix).shape
+            ket_shape = np.asarray(ket_matrix).shape
+            if bra_shape != ket_shape:
+                raise ValueError(f"Shape mismatch: bra has shape {bra_shape}, ket has shape {ket_shape}")
+
+            # Compute matrix element terms
+            bra_terms = self._symbolic_determinant(bra_matrix)
+            ket_terms = self._symbolic_determinant(ket_matrix)
+            inner_terms = self._compute_inner_product_terms(bra_terms, ket_terms, orthogonal=False)
+
+            # Build result string using matrix element notation ⟨a,b,c|op|d,e,f⟩
+            parts = []
+            first = True
+            for sign, bra_elems, ket_elems in inner_terms:
+                if sign > 0:
+                    if not first:
+                        parts.append(" + ")
+                else:
+                    parts.append(" - ")
+                first = False
+
+                # Matrix element: ⟨bra_elements|operator|ket_elements⟩
+                bra_str = ", ".join(str(b) for b in bra_elems)
+                ket_str = ", ".join(str(k) for k in ket_elems)
+                parts.append(f"\\langle {bra_str} | {operator_str} | {ket_str} \\rangle")
+
+            return "".join(parts) if parts else "0"
+
+        # Case 2: Simple bra @ op @ simple ket
+        elif bra_label is not None and ket_label is not None:
+            bra_str = bra_label
+            ket_str = ket_label
+            if isinstance(bra_str, (list, tuple)):
+                bra_str = ", ".join(str(c) for c in bra_str)
+            if isinstance(ket_str, (list, tuple)):
+                ket_str = ", ".join(str(c) for c in ket_str)
+            return f"\\langle {bra_str} | {operator_str} | {ket_str} \\rangle"
+
+        # Case 3: determinant_bra @ op @ simple ket
+        elif bra_matrix is not None and ket_label is not None:
+            ket_str = ket_label
+            if isinstance(ket_str, (list, tuple)):
+                ket_str = ", ".join(str(c) for c in ket_str)
+
+            bra_terms = self._symbolic_determinant(bra_matrix)
+            parts = []
+            first = True
+            for sign, elements in bra_terms:
+                if sign > 0:
+                    if not first:
+                        parts.append(" + ")
+                else:
+                    parts.append(" - ")
+                first = False
+                elem_str = ", ".join(str(e) for e in elements)
+                parts.append(f"\\langle {elem_str} | {operator_str} | {ket_str} \\rangle")
+
+            return "".join(parts)
+
+        # Case 4: simple bra @ op @ determinant_ket
+        elif bra_label is not None and ket_matrix is not None:
+            bra_str = bra_label
+            if isinstance(bra_str, (list, tuple)):
+                bra_str = ", ".join(str(c) for c in bra_str)
+
+            ket_terms = self._symbolic_determinant(ket_matrix)
+            parts = []
+            first = True
+            for sign, elements in ket_terms:
+                if sign > 0:
+                    if not first:
+                        parts.append(" + ")
+                else:
+                    parts.append(" - ")
+                first = False
+                elem_str = ", ".join(str(e) for e in elements)
+                parts.append(f"\\langle {bra_str} | {operator_str} | {elem_str} \\rangle")
+
+            return "".join(parts)
+
+        else:
+            raise ValueError("Cannot compute matrix element: incompatible operands")
+
+    def __rmatmul__(self, other):
+        """Right matrix multiplication - not typically used but included for completeness."""
+        raise TypeError("Right @ operation not supported. Use bra @ ket order.")
+
+    def __add__(self, other: "Math") -> "Math":
+        """
+        Addition operator (+) for combining Math expressions.
+
+        Concatenates two Math expressions with a plus sign between them.
+
+        Example:
+            m1 = Math().var('a')
+            m2 = Math().var('b')
+            m3 = m1 + m2  # Results in "a + b"
+        """
+        if not isinstance(other, Math):
+            raise TypeError(f"unsupported operand type(s) for +: 'Math' and '{type(other).__name__}'")
+
+        result = Math()
+        result._parts = self._parts.copy()
+        result._parts.append(" + ")
+        result._parts.extend(other._parts)
+        return result
+
+    def __sub__(self, other: "Math") -> "Math":
+        """
+        Subtraction operator (-) for combining Math expressions.
+
+        Concatenates two Math expressions with a minus sign between them.
+
+        Example:
+            m1 = Math().var('a')
+            m2 = Math().var('b')
+            m3 = m1 - m2  # Results in "a - b"
+        """
+        if not isinstance(other, Math):
+            raise TypeError(f"unsupported operand type(s) for -: 'Math' and '{type(other).__name__}'")
+
+        result = Math()
+        result._parts = self._parts.copy()
+        result._parts.append(" - ")
+        result._parts.extend(other._parts)
+        return result
+
+    def __mul__(self, other: "Math") -> "Math":
+        """
+        Multiplication operator (*) for combining Math expressions.
+
+        Concatenates two Math expressions with a cdot between them.
+
+        Example:
+            m1 = Math().var('a')
+            m2 = Math().var('b')
+            m3 = m1 * m2  # Results in "a \\cdot b"
+        """
+        if not isinstance(other, Math):
+            raise TypeError(f"unsupported operand type(s) for *: 'Math' and '{type(other).__name__}'")
+
+        result = Math()
+        result._parts = self._parts.copy()
+        result._parts.append(" \\cdot ")
+        result._parts.extend(other._parts)
+        return result
 
 
 # Convenience functions for common expressions

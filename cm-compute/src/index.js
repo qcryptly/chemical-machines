@@ -826,13 +826,32 @@ app.delete('/compute/:jobId', async (req, res) => {
   }
 });
 
+// Retry helper with exponential backoff
+async function retryWithBackoff(fn, name, maxRetries = 30, initialDelay = 1000) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (attempt === maxRetries) {
+        throw error;
+      }
+      const delay = Math.min(initialDelay * Math.pow(1.5, attempt - 1), 10000);
+      console.log(`Waiting for ${name}... (attempt ${attempt}/${maxRetries}, retry in ${Math.round(delay/1000)}s)`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+}
+
 // Start the server
 async function start() {
   try {
     logger.info('Starting cm-compute daemon');
 
-    // Initialize database
-    const db = await database.initialize();
+    // Initialize database with retry
+    const db = await retryWithBackoff(
+      () => database.initialize(),
+      'PostgreSQL'
+    );
     Job = db.models.Job;
     CppEnvironment = db.models.CppEnvironment;
     VendorEnvironment = db.models.VendorEnvironment;
@@ -840,8 +859,11 @@ async function start() {
     logger.info('Database initialized');
     console.log('Database initialized');
 
-    // Test Elasticsearch connection
-    await esClient.ping();
+    // Test Elasticsearch connection with retry
+    await retryWithBackoff(
+      () => esClient.ping(),
+      'Elasticsearch'
+    );
     logger.info('Connected to Elasticsearch');
     console.log('Connected to Elasticsearch');
 
@@ -968,14 +990,14 @@ async function start() {
 
           } else if (data.type === 'terminal_create') {
             // Create a new terminal session for a workspace
-            const { workspaceId } = data;
+            const { workspaceId, cols, rows } = data;
             const emit = (type, payload) => {
               if (ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({ type, ...payload }));
               }
             };
 
-            const sessionId = terminal.createSession(workspaceId, emit);
+            const sessionId = terminal.createSession(workspaceId, emit, { cols, rows });
             ws.terminalSessions = ws.terminalSessions || new Set();
             ws.terminalSessions.add(sessionId);
 

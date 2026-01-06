@@ -1279,6 +1279,22 @@ wss.on('connection', (ws) => {
   });
 });
 
+// Retry helper with exponential backoff
+async function retryWithBackoff(fn, name, maxRetries = 30, initialDelay = 1000) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (attempt === maxRetries) {
+        throw error;
+      }
+      const delay = Math.min(initialDelay * Math.pow(1.5, attempt - 1), 10000);
+      console.log(`Waiting for ${name}... (attempt ${attempt}/${maxRetries}, retry in ${Math.round(delay/1000)}s)`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+}
+
 // Initialize database schema
 async function initDatabase() {
   await pgPool.query(`
@@ -1313,10 +1329,18 @@ app.get('*', (req, res) => {
 // Start server
 async function start() {
   try {
-    await initDatabase();
+    // Initialize database with retry
+    await retryWithBackoff(
+      () => initDatabase(),
+      'PostgreSQL'
+    );
     console.log('Database initialized');
 
-    await esClient.ping();
+    // Connect to Elasticsearch with retry
+    await retryWithBackoff(
+      () => esClient.ping(),
+      'Elasticsearch'
+    );
     console.log('Connected to Elasticsearch');
 
     server.listen(PORT, () => {

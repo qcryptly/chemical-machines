@@ -76,15 +76,9 @@ RUN conda tos accept --override-channels --channel https://conda.anaconda.org/py
     && conda tos accept --override-channels --channel https://conda.anaconda.org/nvidia \
     && conda tos accept --override-channels --channel default
 
-# Create conda environment for compute with PyTorch + CUDA
-RUN conda create -n chemcomp python=3.12 -y \
-    && conda install -n chemcomp -c pytorch -c nvidia pytorch torchvision torchaudio pytorch-cuda -y
-
-RUN conda run -n chemcomp pip install --no-cache-dir \
-        numpy scipy scikit-learn pandas \
-        biopython rdkit openmm mdanalysis \
-        psycopg2-binary elasticsearch \
-        pybind11
+# Note: The 'torch' conda environment is initialized on first startup via
+# docker/init-torch-env.sh which detects CUDA version at runtime.
+# This allows the same image to work with different CUDA versions.
 
 # Create application user
 RUN useradd -m -s /bin/bash cmuser
@@ -115,9 +109,6 @@ RUN service postgresql start \
     && su - postgres -c "psql -c \"CREATE DATABASE chemicalmachines OWNER cmuser;\"" \
     && su - postgres -c "psql -c \"GRANT ALL PRIVILEGES ON DATABASE chemicalmachines TO cmuser;\"" \
     && service postgresql stop
-
-# Update supervisord to use conda environment for cm-compute
-RUN sed -i 's|/usr/bin/node /app/cm-compute|/opt/conda/envs/chemcomp/bin/python /app/cm-compute|g' /etc/supervisor/conf.d/supervisord.conf
 
 RUN npm i -g concurrently nodemon
 

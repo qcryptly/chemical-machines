@@ -81,7 +81,7 @@
                   {{ env.packageCount }} packages
                 </span>
                 <button
-                  v-if="!env.isBase && env.name !== 'chemcomp'"
+                  v-if="!env.isBase && env.name !== 'torch'"
                   @click.stop="deleteEnvironment(env.name)"
                   class="delete-env-btn"
                   title="Delete environment"
@@ -583,7 +583,7 @@ async function refreshWebGL() {
 
 // Environment state (Python/Conda)
 const environments = ref([])
-const selectedEnvironment = ref('chemcomp')
+const selectedEnvironment = ref('torch')
 const pythonVersions = ref(['3.12', '3.11', '3.10', '3.9', '3.8'])
 
 // C++ Environment state
@@ -744,7 +744,7 @@ async function loadEnvironments() {
     // Fallback
     environments.value = [
       { name: 'base', pythonVersion: '3.12', packageCount: 0, isBase: true },
-      { name: 'chemcomp', pythonVersion: '3.12', packageCount: 0, isBase: false }
+      { name: 'torch', pythonVersion: '3.12', packageCount: 0, isBase: false }
     ]
   }
 }
@@ -998,7 +998,7 @@ async function deleteEnvironment(name) {
     await axios.delete(`/api/environments/${name}`)
     await loadEnvironments()
     if (selectedEnvironment.value === name) {
-      selectedEnvironment.value = 'chemcomp'
+      selectedEnvironment.value = 'torch'
     }
   } catch (error) {
     console.error('Error deleting environment:', error)

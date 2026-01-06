@@ -123,7 +123,7 @@ async function executeJob(job) {
   const handler = getJobHandler(type);
 
   // Determine Python environment
-  const environment = params?.environment || 'chemcomp';
+  const environment = params?.environment || 'torch';
   const pythonPath = getPythonPath(environment);
 
   // Create context for the handler

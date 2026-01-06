@@ -18,11 +18,18 @@ const WORKSPACE_DIR = process.env.WORKSPACE_DIR || '/app/workspace';
  * Create a new terminal session for a workspace
  * @param {string} workspaceId - Workspace ID
  * @param {Function} emit - Function to emit output to client
+ * @param {Object} options - Optional settings
+ * @param {number} options.cols - Initial terminal columns (default 80)
+ * @param {number} options.rows - Initial terminal rows (default 24)
  * @returns {string} Session ID
  */
-function createSession(workspaceId, emit) {
+function createSession(workspaceId, emit, options = {}) {
   const sessionId = `term-${workspaceId}-${Date.now()}`;
   const workspaceDir = path.join(WORKSPACE_DIR, String(workspaceId));
+
+  // Use provided dimensions or defaults
+  const cols = options.cols || 80;
+  const rows = options.rows || 24;
 
   // Ensure workspace directory exists
   if (!fs.existsSync(workspaceDir)) {
@@ -32,11 +39,11 @@ function createSession(workspaceId, emit) {
   // Determine shell
   const shell = process.env.SHELL || '/bin/bash';
 
-  // Create PTY with workspace as cwd
+  // Create PTY with workspace as cwd and initial dimensions
   const ptyProcess = pty.spawn(shell, [], {
     name: 'xterm-256color',
-    cols: 80,
-    rows: 24,
+    cols,
+    rows,
     cwd: workspaceDir,
     env: {
       ...process.env,
@@ -71,8 +78,9 @@ function createSession(workspaceId, emit) {
   });
 
   // Send initial setup commands
-  // Activate conda base environment
+  // Activate conda and the default 'torch' environment
   ptyProcess.write('source /opt/conda/etc/profile.d/conda.sh 2>/dev/null\n');
+  ptyProcess.write('conda activate torch 2>/dev/null || true\n');
   ptyProcess.write('clear\n');
 
   return sessionId;

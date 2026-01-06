@@ -21,6 +21,7 @@ Complete reference documentation for the `cm` library - a Python library for cre
   - [Equations and Alignment](#equations-and-alignment)
   - [Matrices](#matrices)
   - [Math Lists](#math-lists)
+  - [Symbolic Expressions](#symbolic-expressions)
   - [Math Builder Class](#math-builder-class)
   - [Notation Styles](#notation-styles)
   - [Chemistry Helpers](#chemistry-helpers)
@@ -901,9 +902,251 @@ items(
 
 ---
 
+### Symbolic Expressions
+
+The `Math` class provides a symbolic expression system that supports:
+- Variable and constant creation
+- Arithmetic operations with operator overloading
+- Differentiation and integration
+- Special functions (Bessel, Legendre, Hermite, etc.)
+- LaTeX rendering
+- Numerical evaluation
+- PyTorch compilation for GPU acceleration
+
+#### Creating Expressions
+
+```python
+from cm.symbols import Math
+
+# Create variables
+x = Math.var("x")
+n = Math.var("n")
+theta = Math.var("theta")
+
+# Create constants
+c = Math.const(3.14159)
+
+# Build expressions with operators
+expr = x**2 + 2*x + 1
+quadratic = (x - 1) * (x + 1)  # x² - 1
+
+# Render as LaTeX
+expr.render()
+
+# Evaluate numerically
+result = expr.evaluate(x=3)  # = 16
+```
+
+#### Calculus
+
+```python
+from cm.symbols import Math
+
+x = Math.var("x")
+expr = x**3 + 2*x
+
+# Differentiation
+derivative = expr.diff(x)
+derivative.render()  # 3x² + 2
+
+# Integration
+integral = expr.integrate(x)
+integral.render()  # x⁴/4 + x²
+
+# Definite integration
+definite = expr.integrate(x, bounds=[0, 1])
+definite.evaluate()  # = 1.25
+```
+
+#### Summation and Products
+
+```python
+from cm.symbols import Math
+
+i = Math.var("i")
+n = Math.var("n")
+
+# Discrete summation: Σ_{i=1}^{n} i²
+sum_expr = Math.sum(i**2, i, 1, n)
+sum_expr.render()
+
+# Discrete product: Π_{i=1}^{5} i = 5!
+prod_expr = Math.prod(i, i, 1, 5)
+prod_expr.evaluate()  # = 120
+
+# Chain syntax
+(i**2).sum(i, bounds=(1, n)).render()
+```
+
+#### Special Functions
+
+Access 50+ special functions commonly used in physics:
+
+```python
+from cm.symbols import Math
+
+x = Math.var("x")
+n = Math.var("n")
+
+# Gamma and factorials
+Math.gamma(5).evaluate()           # Γ(5) = 24
+Math.factorial(5).evaluate()       # 5! = 120
+Math.binomial(10, 3).evaluate()    # C(10,3) = 120
+Math.beta(2, 3).evaluate()         # B(2,3)
+
+# Error functions
+Math.erf(1).evaluate()             # erf(1) ≈ 0.8427
+Math.erfc(1).evaluate()            # erfc(1) ≈ 0.1573
+
+# Bessel functions
+Math.besselj(0, 2.4).evaluate()    # J₀(2.4)
+Math.bessely(1, x).render()        # Y₁(x)
+Math.besseli(0, x).render()        # I₀(x) - modified
+Math.besselk(0, x).render()        # K₀(x) - modified
+Math.jn(0, x).render()             # j₀(x) - spherical
+Math.yn(0, x).render()             # y₀(x) - spherical
+
+# Orthogonal polynomials
+Math.legendre(n, x).render()               # Pₙ(x) - Legendre
+Math.assoc_legendre(2, 1, x).render()      # P₂¹(x) - Associated Legendre
+Math.hermite(n, x).render()                # Hₙ(x) - Hermite (physicist)
+Math.hermite_prob(n, x).render()           # Heₙ(x) - Hermite (probabilist)
+Math.laguerre(n, x).render()               # Lₙ(x) - Laguerre
+Math.assoc_laguerre(n, 2, x).render()      # Lₙ⁽²⁾(x) - Associated Laguerre
+Math.chebyshevt(n, x).render()             # Tₙ(x) - Chebyshev 1st kind
+Math.chebyshevu(n, x).render()             # Uₙ(x) - Chebyshev 2nd kind
+Math.gegenbauer(n, 0.5, x).render()        # Cₙ⁽⁰·⁵⁾(x) - Gegenbauer
+Math.jacobi(n, 1, 2, x).render()           # Pₙ⁽¹'²⁾(x) - Jacobi
+
+# Spherical harmonics
+theta, phi = Math.var("theta"), Math.var("phi")
+l, m = Math.var("l"), Math.var("m")
+Math.Ylm(l, m, theta, phi).render()        # Yₗᵐ(θ,φ) - complex
+Math.Ylm_real(l, m, theta, phi).render()   # Yₗₘ(θ,φ) - real
+
+# Airy functions
+Math.airyai(x).render()            # Ai(x)
+Math.airybi(x).render()            # Bi(x)
+
+# Hypergeometric functions
+a, b, c, z = Math.var("a"), Math.var("b"), Math.var("c"), Math.var("z")
+Math.hyper2f1(a, b, c, z).render()         # ₂F₁(a,b;c;z) - Gauss
+Math.hyper1f1(a, b, z).render()            # ₁F₁(a;b;z) - Confluent
+Math.hyper0f1(b, z).render()               # ₀F₁(;b;z)
+
+# Elliptic integrals
+Math.elliptic_k(0.5).evaluate()    # K(0.5) - complete 1st kind
+Math.elliptic_e(0.5).evaluate()    # E(0.5) - complete 2nd kind
+
+# Other functions
+Math.zeta(2).evaluate()            # ζ(2) = π²/6
+Math.polylog(2, 0.5).evaluate()    # Li₂(0.5)
+Math.dirac(x).render()             # δ(x)
+Math.heaviside(x).render()         # θ(x)
+Math.kronecker(i, j).render()      # δᵢⱼ
+Math.levi_civita(i, j, k).render() # εᵢⱼₖ
+```
+
+**Available function categories:**
+- **Gamma**: `gamma`, `loggamma`, `digamma`, `beta`, `factorial`, `factorial2`, `binomial`
+- **Error**: `erf`, `erfc`, `erfi`
+- **Bessel**: `besselj`, `bessely`, `besseli`, `besselk`, `jn`, `yn`, `hankel1`, `hankel2`
+- **Airy**: `airyai`, `airybi`, `airyaiprime`, `airybiprime`
+- **Polynomials**: `legendre`, `assoc_legendre`, `hermite`, `hermite_prob`, `laguerre`, `assoc_laguerre`, `chebyshevt`, `chebyshevu`, `gegenbauer`, `jacobi`
+- **Spherical**: `Ylm`, `Ylm_real`
+- **Hypergeometric**: `hyper2f1`, `hyper1f1`, `hyper0f1`, `hyperpfq`
+- **Elliptic**: `elliptic_k`, `elliptic_e`, `elliptic_pi`
+- **Other**: `zeta`, `polylog`, `dirac`, `heaviside`, `kronecker`, `levi_civita`
+
+#### Custom Functions with Hyperparameters
+
+Define reusable symbolic functions with typed hyperparameters:
+
+```python
+from cm.symbols import Math, Scalar
+
+# Define a function with typed hyperparameters
+a, b, x = Math.var("a"), Math.var("b"), Math.var("x")
+f = Math.function(a * Math.exp(b * x), hyperparams={"a": Scalar, "b": Scalar})
+f.save("MyExponential")
+
+# Retrieve and instantiate with specific values
+func = Math.get_function("MyExponential")
+inst = func.init(a=10, b=0.5)
+inst.render()           # Shows: 10·e^(0.5x)
+
+# Eager evaluation
+result = inst.run(x=2)  # Evaluates numerically
+
+# Lazy evaluation (returns ComputeGraph)
+cg = inst.run_with(x=2)
+cg.evaluate()           # Same result, but lazily
+```
+
+#### PyTorch Compilation
+
+Compile expressions to GPU-accelerated PyTorch functions:
+
+```python
+from cm.symbols import Math
+import torch
+
+x = Math.var("x")
+expr = Math.sin(x) * Math.exp(-x**2)
+
+# Create a bound function
+a = Math.var("a")
+f = Math.function(a * expr, hyperparams={"a": Scalar})
+inst = f.init(a=2.0)
+
+# Compile to PyTorch
+cg = inst.run_with(x=1.0)
+torch_fn = cg.compile(device='cuda')  # or 'cpu'
+
+# Evaluate on GPU with tensors
+x_tensor = torch.linspace(0, 10, 1000).cuda()
+result = torch_fn(x=x_tensor)
+
+# Automatic differentiation
+grad_fn = torch_fn.grad()
+gradients = grad_fn(x=1.0)  # Returns dict of gradients
+```
+
+#### Physics Examples
+
+**Hydrogen atom radial wavefunction:**
+```python
+from cm.symbols import Math
+
+n, l, r, a0 = Math.var("n"), Math.var("l"), Math.var("r"), Math.var("a_0")
+
+# Radial part uses associated Laguerre polynomials
+rho = 2*r / (n*a0)
+R = Math.assoc_laguerre(n - l - 1, 2*l + 1, rho)
+R.render()  # Displays L_{n-l-1}^{(2l+1)}(2r/na₀)
+
+# Angular part uses spherical harmonics
+theta, phi, m = Math.var("theta"), Math.var("phi"), Math.var("m")
+Y = Math.Ylm(l, m, theta, phi)
+Y.render()  # Displays Y_l^m(θ, φ)
+```
+
+**Quantum harmonic oscillator:**
+```python
+from cm.symbols import Math
+
+n, x, sigma = Math.var("n"), Math.var("x"), Math.var("sigma")
+
+# Wavefunction: ψ_n(x) ∝ H_n(x/σ) exp(-x²/2σ²)
+psi = Math.hermite(n, x/sigma) * Math.exp(-x**2 / (2*sigma**2))
+psi.render()
+```
+
+---
+
 ### Math Builder Class
 
-The `Math` class provides a builder pattern for constructing LaTeX expressions programmatically.
+The `Math` class also provides a builder pattern for constructing LaTeX expressions programmatically.
 
 #### Creating and Rendering
 

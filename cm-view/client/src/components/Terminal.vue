@@ -30,10 +30,16 @@ function connect() {
   ws = new WebSocket(wsUrl)
 
   ws.onopen = () => {
-    // Request a new terminal session for this workspace
+    // Get initial dimensions from the terminal
+    const cols = terminal?.cols || 80
+    const rows = terminal?.rows || 24
+
+    // Request a new terminal session for this workspace with initial size
     ws.send(JSON.stringify({
       type: 'terminal_create',
-      workspaceId: props.workspaceId
+      workspaceId: props.workspaceId,
+      cols,
+      rows
     }))
   }
 

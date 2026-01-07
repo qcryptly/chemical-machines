@@ -6,7 +6,25 @@ A library for Chemical Machines workspace functionality.
 Modules:
     views: HTML output rendering for cells and workspaces
     symbols: LaTeX math and symbol rendering with notation styles
-    qm: Quantum mechanics - Slater determinants, spin-orbitals, matrix elements
+    qm: Quantum mechanics - atoms, Slater determinants, spin-orbitals, matrix elements
+
+Quick Start - Atoms:
+    from cm import qm
+
+    # Create an atom with automatic electron configuration
+    C = qm.atom('C')
+    print(C.configuration.label)  # "1s² 2s² 2p²"
+
+    # Create Slater determinant and compute matrix elements
+    psi = C.slater_determinant()
+    H = qm.hamiltonian()
+    energy = psi @ H @ psi
+
+    # Relativistic calculations for heavy atoms
+    Au = qm.atom('Au', relativistic=True)
+    psi_rel = Au.dirac_determinant()
+
+See qm module docstring for more examples.
 """
 
 from . import views
@@ -47,6 +65,25 @@ from .qm import (
     dirac_slater,
     dirac_hamiltonian,
     kappa_from_lj,
+    # Atoms and electron configurations
+    ATOMIC_NUMBERS,
+    ELEMENT_SYMBOLS,
+    AUFBAU_ORDER,
+    ElectronConfiguration,
+    Atom,
+    atom,
+    atoms,
+    ground_state,
+    config_from_string,
+    # Molecules
+    Molecule,
+    molecule,
+    # Hamiltonian builder system
+    HamiltonianTerm,
+    HamiltonianBuilder,
+    MolecularHamiltonian,
+    MatrixExpression,
+    HamiltonianMatrix,
 )
 
 # Re-export commonly used classes from symbols for convenience
@@ -127,6 +164,23 @@ from .symbols import (
     Heaviside,
     KroneckerDelta,
     LeviCivita,
+    # Angular momentum coupling
+    ClebschGordan,
+    Wigner3j,
+    Wigner6j,
+    Wigner9j,
+    # Differential operators
+    DifferentialOperator,
+    PartialDerivative,
+    Gradient,
+    Laplacian,
+    # Hydrogen-like wavefunctions
+    HydrogenRadial,
+    HydrogenOrbital,
+    # Basis functions
+    SlaterTypeOrbital,
+    GaussianTypeOrbital,
+    ContractedGTO,
 )
 
 __all__ = [
@@ -165,6 +219,25 @@ __all__ = [
     'dirac_slater',
     'dirac_hamiltonian',
     'kappa_from_lj',
+    # QM - Atoms and electron configurations
+    'ATOMIC_NUMBERS',
+    'ELEMENT_SYMBOLS',
+    'AUFBAU_ORDER',
+    'ElectronConfiguration',
+    'Atom',
+    'atom',
+    'atoms',
+    'ground_state',
+    'config_from_string',
+    # QM - Molecules
+    'Molecule',
+    'molecule',
+    # QM - Hamiltonian builder system
+    'HamiltonianTerm',
+    'HamiltonianBuilder',
+    'MolecularHamiltonian',
+    'MatrixExpression',
+    'HamiltonianMatrix',
     # Core expression classes
     'Math',
     'Expr',
@@ -241,4 +314,21 @@ __all__ = [
     'Heaviside',
     'KroneckerDelta',
     'LeviCivita',
+    # Angular momentum coupling
+    'ClebschGordan',
+    'Wigner3j',
+    'Wigner6j',
+    'Wigner9j',
+    # Differential operators
+    'DifferentialOperator',
+    'PartialDerivative',
+    'Gradient',
+    'Laplacian',
+    # Hydrogen-like wavefunctions
+    'HydrogenRadial',
+    'HydrogenOrbital',
+    # Basis functions
+    'SlaterTypeOrbital',
+    'GaussianTypeOrbital',
+    'ContractedGTO',
 ]

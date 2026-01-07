@@ -66,6 +66,117 @@ from enum import Enum
 from abc import ABC, abstractmethod
 from . import views
 
+__all__ = [
+    # Core expression classes
+    'Math',
+    'Expr',
+    'Var',
+    'Const',
+    'Sum',
+    'Product',
+    # Hyperparameter types
+    'Scalar',
+    'ExprType',
+    'BoundsType',
+    # Function composition
+    'SymbolicFunction',
+    'BoundFunction',
+    'ComputeGraph',
+    # PyTorch compilation
+    'TorchFunction',
+    'TorchGradFunction',
+    # Special functions - Base class
+    'SpecialFunction',
+    # Gamma and related
+    'Gamma',
+    'LogGamma',
+    'Digamma',
+    'Beta',
+    'Factorial',
+    'DoubleFactorial',
+    'Binomial',
+    # Error functions
+    'Erf',
+    'Erfc',
+    'Erfi',
+    # Bessel functions
+    'BesselJ',
+    'BesselY',
+    'BesselI',
+    'BesselK',
+    'SphericalBesselJ',
+    'SphericalBesselY',
+    'Hankel1',
+    'Hankel2',
+    # Airy functions
+    'AiryAi',
+    'AiryBi',
+    'AiryAiPrime',
+    'AiryBiPrime',
+    # Orthogonal polynomials
+    'Legendre',
+    'AssocLegendre',
+    'Hermite',
+    'HermiteProb',
+    'Laguerre',
+    'AssocLaguerre',
+    'Chebyshev1',
+    'Chebyshev2',
+    'Gegenbauer',
+    'Jacobi',
+    # Spherical harmonics
+    'SphericalHarmonic',
+    'RealSphericalHarmonic',
+    # Hypergeometric functions
+    'Hypergeometric2F1',
+    'Hypergeometric1F1',
+    'Hypergeometric0F1',
+    'HypergeometricPFQ',
+    # Elliptic integrals
+    'EllipticK',
+    'EllipticE',
+    'EllipticPi',
+    # Other special functions
+    'Zeta',
+    'PolyLog',
+    'DiracDelta',
+    'Heaviside',
+    'KroneckerDelta',
+    'LeviCivita',
+    # Angular momentum coupling
+    'ClebschGordan',
+    'Wigner3j',
+    'Wigner6j',
+    'Wigner9j',
+    # Differential operators
+    'DifferentialOperator',
+    'PartialDerivative',
+    'Gradient',
+    'Laplacian',
+    # Hydrogen-like wavefunctions
+    'HydrogenRadial',
+    'HydrogenOrbital',
+    # Basis functions
+    'SlaterTypeOrbital',
+    'GaussianTypeOrbital',
+    'ContractedGTO',
+    # LaTeX rendering
+    'latex',
+    'equation',
+    'align',
+    'matrix',
+    'bullets',
+    'numbered',
+    'items',
+    'set_notation',
+    'set_line_height',
+    # Chemistry helpers
+    'chemical',
+    'reaction',
+    'fraction',
+    'sqrt',
+]
+
 # Lazy imports for heavy dependencies
 _sympy = None
 _torch = None
@@ -3954,6 +4065,944 @@ class LeviCivita(SpecialFunction):
     def to_latex(self) -> str:
         indices_latex = ",".join(idx.to_latex() for idx in self.indices)
         return f"\\varepsilon_{{{indices_latex}}}"
+
+
+# =============================================================================
+# ANGULAR MOMENTUM COUPLING COEFFICIENTS
+# =============================================================================
+
+
+class ClebschGordan(SpecialFunction):
+    """
+    Clebsch-Gordan coefficient ⟨j₁ m₁ j₂ m₂ | J M⟩.
+
+    Coupling coefficients for angular momentum addition:
+    |J M⟩ = Σ_{m₁,m₂} ⟨j₁ m₁ j₂ m₂ | J M⟩ |j₁ m₁⟩ |j₂ m₂⟩
+
+    Selection rules:
+    - |j₁ - j₂| ≤ J ≤ j₁ + j₂
+    - m₁ + m₂ = M
+    - |m₁| ≤ j₁, |m₂| ≤ j₂, |M| ≤ J
+
+    Example:
+        from cm import ClebschGordan
+        # ⟨1/2, 1/2, 1/2, -1/2 | 1, 0⟩
+        cg = ClebschGordan(Const(0.5), Const(0.5), Const(0.5), Const(-0.5), Const(1), Const(0))
+        cg.render()
+    """
+    _name = "clebsch_gordan"
+    _latex_name = "C"
+    _sympy_func = "CG"
+
+    def __init__(self, j1: Expr, m1: Expr, j2: Expr, m2: Expr, J: Expr, M: Expr):
+        super().__init__(j1, m1, j2, m2, J, M)
+
+    @property
+    def j1(self) -> Expr:
+        return self.args[0]
+
+    @property
+    def m1(self) -> Expr:
+        return self.args[1]
+
+    @property
+    def j2(self) -> Expr:
+        return self.args[2]
+
+    @property
+    def m2(self) -> Expr:
+        return self.args[3]
+
+    @property
+    def J(self) -> Expr:
+        return self.args[4]
+
+    @property
+    def M(self) -> Expr:
+        return self.args[5]
+
+    def to_sympy(self):
+        import sympy as sp
+        from sympy.physics.quantum.cg import CG
+        return CG(
+            self.j1.to_sympy(), self.m1.to_sympy(),
+            self.j2.to_sympy(), self.m2.to_sympy(),
+            self.J.to_sympy(), self.M.to_sympy()
+        ).doit()
+
+    def to_latex(self) -> str:
+        return (f"\\langle {self.j1.to_latex()}, {self.m1.to_latex()}, "
+                f"{self.j2.to_latex()}, {self.m2.to_latex()} | "
+                f"{self.J.to_latex()}, {self.M.to_latex()} \\rangle")
+
+
+class Wigner3j(SpecialFunction):
+    """
+    Wigner 3-j symbol.
+
+    Related to Clebsch-Gordan coefficients:
+    ⎛ j₁  j₂  j₃ ⎞
+    ⎝ m₁  m₂  m₃ ⎠ = (-1)^(j₁-j₂-m₃) / √(2j₃+1) × ⟨j₁ m₁ j₂ m₂ | j₃ -m₃⟩
+
+    Selection rules:
+    - m₁ + m₂ + m₃ = 0
+    - Triangle condition: |j₁ - j₂| ≤ j₃ ≤ j₁ + j₂
+
+    Example:
+        w3j = Wigner3j(Const(1), Const(1), Const(2), Const(0), Const(0), Const(0))
+        w3j.render()
+    """
+    _name = "wigner_3j"
+    _latex_name = "3j"
+    _sympy_func = "Wigner3j"
+
+    def __init__(self, j1: Expr, j2: Expr, j3: Expr, m1: Expr, m2: Expr, m3: Expr):
+        super().__init__(j1, j2, j3, m1, m2, m3)
+
+    @property
+    def j1(self) -> Expr:
+        return self.args[0]
+
+    @property
+    def j2(self) -> Expr:
+        return self.args[1]
+
+    @property
+    def j3(self) -> Expr:
+        return self.args[2]
+
+    @property
+    def m1(self) -> Expr:
+        return self.args[3]
+
+    @property
+    def m2(self) -> Expr:
+        return self.args[4]
+
+    @property
+    def m3(self) -> Expr:
+        return self.args[5]
+
+    def to_sympy(self):
+        import sympy as sp
+        from sympy.physics.wigner import wigner_3j
+        return wigner_3j(
+            self.j1.to_sympy(), self.j2.to_sympy(), self.j3.to_sympy(),
+            self.m1.to_sympy(), self.m2.to_sympy(), self.m3.to_sympy()
+        )
+
+    def to_latex(self) -> str:
+        return (f"\\begin{{pmatrix}} {self.j1.to_latex()} & {self.j2.to_latex()} & {self.j3.to_latex()} \\\\ "
+                f"{self.m1.to_latex()} & {self.m2.to_latex()} & {self.m3.to_latex()} \\end{{pmatrix}}")
+
+
+class Wigner6j(SpecialFunction):
+    """
+    Wigner 6-j symbol (Racah W coefficient).
+
+    Recoupling coefficient for three angular momenta:
+    ⎧ j₁  j₂  j₃ ⎫
+    ⎩ j₄  j₅  j₆ ⎭
+
+    Used in angular momentum recoupling and reduced matrix elements.
+
+    Example:
+        w6j = Wigner6j(Const(1), Const(1), Const(2), Const(1), Const(2), Const(1))
+        w6j.render()
+    """
+    _name = "wigner_6j"
+    _latex_name = "6j"
+    _sympy_func = "Wigner6j"
+
+    def __init__(self, j1: Expr, j2: Expr, j3: Expr, j4: Expr, j5: Expr, j6: Expr):
+        super().__init__(j1, j2, j3, j4, j5, j6)
+
+    @property
+    def j1(self) -> Expr:
+        return self.args[0]
+
+    @property
+    def j2(self) -> Expr:
+        return self.args[1]
+
+    @property
+    def j3(self) -> Expr:
+        return self.args[2]
+
+    @property
+    def j4(self) -> Expr:
+        return self.args[3]
+
+    @property
+    def j5(self) -> Expr:
+        return self.args[4]
+
+    @property
+    def j6(self) -> Expr:
+        return self.args[5]
+
+    def to_sympy(self):
+        import sympy as sp
+        from sympy.physics.wigner import wigner_6j
+        return wigner_6j(
+            self.j1.to_sympy(), self.j2.to_sympy(), self.j3.to_sympy(),
+            self.j4.to_sympy(), self.j5.to_sympy(), self.j6.to_sympy()
+        )
+
+    def to_latex(self) -> str:
+        return (f"\\begin{{Bmatrix}} {self.j1.to_latex()} & {self.j2.to_latex()} & {self.j3.to_latex()} \\\\ "
+                f"{self.j4.to_latex()} & {self.j5.to_latex()} & {self.j6.to_latex()} \\end{{Bmatrix}}")
+
+
+class Wigner9j(SpecialFunction):
+    """
+    Wigner 9-j symbol.
+
+    Recoupling coefficient for four angular momenta:
+    ⎧ j₁  j₂  j₃ ⎫
+    ⎨ j₄  j₅  j₆ ⎬
+    ⎩ j₇  j₈  j₉ ⎭
+
+    Example:
+        w9j = Wigner9j(*[Const(1) for _ in range(9)])
+        w9j.render()
+    """
+    _name = "wigner_9j"
+    _latex_name = "9j"
+    _sympy_func = "Wigner9j"
+
+    def __init__(self, j1: Expr, j2: Expr, j3: Expr,
+                 j4: Expr, j5: Expr, j6: Expr,
+                 j7: Expr, j8: Expr, j9: Expr):
+        super().__init__(j1, j2, j3, j4, j5, j6, j7, j8, j9)
+
+    def to_sympy(self):
+        import sympy as sp
+        from sympy.physics.wigner import wigner_9j
+        return wigner_9j(*[arg.to_sympy() for arg in self.args])
+
+    def to_latex(self) -> str:
+        j = [arg.to_latex() for arg in self.args]
+        return (f"\\begin{{Bmatrix}} {j[0]} & {j[1]} & {j[2]} \\\\ "
+                f"{j[3]} & {j[4]} & {j[5]} \\\\ "
+                f"{j[6]} & {j[7]} & {j[8]} \\end{{Bmatrix}}")
+
+
+# =============================================================================
+# DIFFERENTIAL OPERATORS
+# =============================================================================
+
+
+class DifferentialOperator(Expr):
+    """
+    Base class for differential operators.
+
+    Differential operators act on functions/expressions and can be
+    composed, applied, and rendered symbolically.
+    """
+
+    def __init__(self):
+        pass
+
+    def __call__(self, expr: Expr) -> Expr:
+        """Apply operator to an expression."""
+        raise NotImplementedError("Subclasses must implement __call__")
+
+    def __mul__(self, other):
+        """Compose operators or scale by constant."""
+        if isinstance(other, DifferentialOperator):
+            return ComposedOperator(self, other)
+        elif isinstance(other, Expr):
+            return AppliedOperator(self, other)
+        else:
+            return AppliedOperator(self, _ensure_expr(other))
+
+    def __rmul__(self, other):
+        """Scalar multiplication from left."""
+        return ScaledOperator(_ensure_expr(other), self)
+
+    def __add__(self, other):
+        """Add operators."""
+        if isinstance(other, DifferentialOperator):
+            return SumOperator(self, other)
+        return NotImplemented
+
+    def _get_free_variables(self) -> Set['Var']:
+        return set()
+
+
+class PartialDerivative(DifferentialOperator):
+    """
+    Partial derivative operator ∂/∂x.
+
+    Example:
+        x = Math.var("x")
+        d_dx = PartialDerivative(x)
+        f = x**2
+        result = d_dx(f)  # 2x
+    """
+
+    def __init__(self, var: 'Var', order: int = 1):
+        super().__init__()
+        self._var = var
+        self._order = order
+
+    @property
+    def var(self) -> 'Var':
+        return self._var
+
+    @property
+    def order(self) -> int:
+        return self._order
+
+    def __call__(self, expr: Expr) -> Expr:
+        """Apply partial derivative to expression."""
+        result = expr
+        for _ in range(self._order):
+            result = result.diff(self._var)
+        return result
+
+    def to_sympy(self):
+        import sympy as sp
+        # Return a symbolic representation
+        return sp.Derivative(sp.Function('f')(self._var.to_sympy()),
+                            self._var.to_sympy(), self._order)
+
+    def to_latex(self) -> str:
+        var_latex = self._var.to_latex()
+        if self._order == 1:
+            return f"\\frac{{\\partial}}{{\\partial {var_latex}}}"
+        else:
+            return f"\\frac{{\\partial^{self._order}}}{{\\partial {var_latex}^{self._order}}}"
+
+
+class Gradient(DifferentialOperator):
+    """
+    Gradient operator ∇ in specified coordinate system.
+
+    In Cartesian: ∇ = (∂/∂x, ∂/∂y, ∂/∂z)
+    In spherical: ∇ = (∂/∂r, (1/r)∂/∂θ, (1/r sin θ)∂/∂φ)
+
+    Example:
+        x, y, z = Math.var("x"), Math.var("y"), Math.var("z")
+        grad = Gradient([x, y, z], coord_system='cartesian')
+        f = x**2 + y**2
+        grad_f = grad(f)  # Returns vector expression
+    """
+
+    def __init__(self, coords: List['Var'], coord_system: str = 'cartesian'):
+        super().__init__()
+        self._coords = coords
+        self._coord_system = coord_system
+
+    @property
+    def coords(self) -> List['Var']:
+        return self._coords
+
+    @property
+    def coord_system(self) -> str:
+        return self._coord_system
+
+    def __call__(self, expr: Expr) -> List[Expr]:
+        """Apply gradient to expression, returns vector of partial derivatives."""
+        if self._coord_system == 'cartesian':
+            return [expr.diff(c) for c in self._coords]
+        elif self._coord_system == 'spherical':
+            r, theta, phi = self._coords
+            return [
+                expr.diff(r),
+                (Const(1) / r) * expr.diff(theta),
+                (Const(1) / (r * Sin(theta))) * expr.diff(phi)
+            ]
+        else:
+            raise ValueError(f"Unknown coordinate system: {self._coord_system}")
+
+    def to_latex(self) -> str:
+        return r"\nabla"
+
+    def to_sympy(self):
+        import sympy as sp
+        # SymPy vector module would be needed for full support
+        return sp.Symbol('nabla')
+
+
+class Laplacian(DifferentialOperator):
+    """
+    Laplacian operator ∇² in specified coordinate system.
+
+    In Cartesian: ∇² = ∂²/∂x² + ∂²/∂y² + ∂²/∂z²
+
+    In spherical: ∇² = (1/r²)∂/∂r(r²∂/∂r) + (1/r²sinθ)∂/∂θ(sinθ∂/∂θ)
+                       + (1/r²sin²θ)∂²/∂φ²
+
+    Example:
+        r, theta, phi = Math.var("r"), Math.var("theta"), Math.var("phi")
+        laplacian = Laplacian([r, theta, phi], coord_system='spherical')
+        f = r**2
+        result = laplacian(f)  # 6
+    """
+
+    def __init__(self, coords: List['Var'], coord_system: str = 'cartesian'):
+        super().__init__()
+        self._coords = coords
+        self._coord_system = coord_system
+
+    @property
+    def coords(self) -> List['Var']:
+        return self._coords
+
+    @property
+    def coord_system(self) -> str:
+        return self._coord_system
+
+    def __call__(self, expr: Expr) -> Expr:
+        """Apply Laplacian to expression."""
+        if self._coord_system == 'cartesian':
+            # ∇² = ∂²/∂x² + ∂²/∂y² + ∂²/∂z²
+            result = Const(0)
+            for c in self._coords:
+                result = result + expr.diff(c).diff(c)
+            return result
+
+        elif self._coord_system == 'spherical':
+            if len(self._coords) != 3:
+                raise ValueError("Spherical Laplacian requires 3 coordinates (r, θ, φ)")
+            r, theta, phi = self._coords
+
+            # Radial part: (1/r²)∂/∂r(r²∂f/∂r)
+            df_dr = expr.diff(r)
+            radial = (Const(1) / (r * r)) * (Const(2) * r * df_dr + r * r * df_dr.diff(r))
+
+            # Angular part θ: (1/r²sinθ)∂/∂θ(sinθ∂f/∂θ)
+            df_dtheta = expr.diff(theta)
+            angular_theta = (Const(1) / (r * r * Sin(theta))) * (
+                Cos(theta) * df_dtheta + Sin(theta) * df_dtheta.diff(theta)
+            )
+
+            # Angular part φ: (1/r²sin²θ)∂²f/∂φ²
+            angular_phi = (Const(1) / (r * r * Sin(theta) * Sin(theta))) * expr.diff(phi).diff(phi)
+
+            return radial + angular_theta + angular_phi
+
+        else:
+            raise ValueError(f"Unknown coordinate system: {self._coord_system}")
+
+    def to_latex(self) -> str:
+        return r"\nabla^2"
+
+    def to_sympy(self):
+        import sympy as sp
+        return sp.Symbol('nabla^2')
+
+
+class ScaledOperator(DifferentialOperator):
+    """Operator scaled by a constant or expression."""
+
+    def __init__(self, scalar: Expr, operator: DifferentialOperator):
+        super().__init__()
+        self._scalar = scalar
+        self._operator = operator
+
+    def __call__(self, expr: Expr) -> Expr:
+        return self._scalar * self._operator(expr)
+
+    def to_latex(self) -> str:
+        return f"{self._scalar.to_latex()} {self._operator.to_latex()}"
+
+    def to_sympy(self):
+        return self._scalar.to_sympy() * self._operator.to_sympy()
+
+
+class ComposedOperator(DifferentialOperator):
+    """Composition of two operators: A ∘ B means apply B then A."""
+
+    def __init__(self, first: DifferentialOperator, second: DifferentialOperator):
+        super().__init__()
+        self._first = first
+        self._second = second
+
+    def __call__(self, expr: Expr) -> Expr:
+        return self._first(self._second(expr))
+
+    def to_latex(self) -> str:
+        return f"{self._first.to_latex()} {self._second.to_latex()}"
+
+    def to_sympy(self):
+        return self._first.to_sympy() * self._second.to_sympy()
+
+
+class SumOperator(DifferentialOperator):
+    """Sum of two operators."""
+
+    def __init__(self, op1: DifferentialOperator, op2: DifferentialOperator):
+        super().__init__()
+        self._op1 = op1
+        self._op2 = op2
+
+    def __call__(self, expr: Expr) -> Expr:
+        return self._op1(expr) + self._op2(expr)
+
+    def to_latex(self) -> str:
+        return f"\\left({self._op1.to_latex()} + {self._op2.to_latex()}\\right)"
+
+    def to_sympy(self):
+        return self._op1.to_sympy() + self._op2.to_sympy()
+
+
+class AppliedOperator(Expr):
+    """Result of applying an operator to an expression (lazy)."""
+
+    def __init__(self, operator: DifferentialOperator, expr: Expr):
+        self._operator = operator
+        self._expr = expr
+
+    def evaluate(self, **kwargs) -> Any:
+        """Evaluate by first applying operator, then evaluating result."""
+        result = self._operator(self._expr)
+        return result.evaluate(**kwargs)
+
+    def to_sympy(self):
+        result = self._operator(self._expr)
+        return result.to_sympy()
+
+    def to_latex(self) -> str:
+        return f"{self._operator.to_latex()} {self._expr.to_latex()}"
+
+    def _get_free_variables(self) -> Set['Var']:
+        return self._expr._get_free_variables()
+
+
+# =============================================================================
+# HYDROGEN-LIKE WAVEFUNCTIONS
+# =============================================================================
+
+
+class HydrogenRadial(SpecialFunction):
+    """
+    Hydrogen-like radial wavefunction R_nl(r).
+
+    R_nl(r) = N_nl × (2Zr/na₀)^l × e^(-Zr/na₀) × L_{n-l-1}^{2l+1}(2Zr/na₀)
+
+    where:
+    - N_nl is the normalization constant
+    - Z is the nuclear charge
+    - a₀ is the Bohr radius
+    - L_n^α is the associated Laguerre polynomial
+
+    Example:
+        r = Math.var("r")
+        R_10 = HydrogenRadial(n=1, l=0, r=r, Z=1)
+        R_10.render()  # Displays 1s radial function
+    """
+    _name = "hydrogen_radial"
+    _latex_name = "R"
+    _sympy_func = None  # Custom implementation
+
+    def __init__(self, n: Union[int, Expr], l: Union[int, Expr],
+                 r: Expr, Z: Union[int, float, Expr] = 1,
+                 a0: Union[float, Expr] = 1.0):
+        """
+        Args:
+            n: Principal quantum number (n ≥ 1)
+            l: Angular momentum quantum number (0 ≤ l < n)
+            r: Radial coordinate
+            Z: Nuclear charge (default 1 for hydrogen)
+            a0: Bohr radius (default 1.0 for atomic units)
+        """
+        n_expr = _ensure_expr(n)
+        l_expr = _ensure_expr(l)
+        Z_expr = _ensure_expr(Z)
+        a0_expr = _ensure_expr(a0)
+        super().__init__(n_expr, l_expr, r, Z_expr, a0_expr)
+
+    @property
+    def n(self) -> Expr:
+        return self.args[0]
+
+    @property
+    def l(self) -> Expr:
+        return self.args[1]
+
+    @property
+    def r(self) -> Expr:
+        return self.args[2]
+
+    @property
+    def Z(self) -> Expr:
+        return self.args[3]
+
+    @property
+    def a0(self) -> Expr:
+        return self.args[4]
+
+    def to_sympy(self):
+        import sympy as sp
+        from sympy import sqrt, factorial, exp
+        from sympy.functions.special.polynomials import assoc_laguerre
+
+        n = self.n.to_sympy()
+        l = self.l.to_sympy()
+        r = self.r.to_sympy()
+        Z = self.Z.to_sympy()
+        a0 = self.a0.to_sympy()
+
+        # Dimensionless variable
+        rho = 2 * Z * r / (n * a0)
+
+        # Normalization constant
+        norm = sqrt(
+            ((2 * Z) / (n * a0))**3 *
+            factorial(n - l - 1) / (2 * n * factorial(n + l))
+        )
+
+        # Radial wavefunction
+        return norm * exp(-rho / 2) * rho**l * assoc_laguerre(n - l - 1, 2*l + 1, rho)
+
+    def to_latex(self) -> str:
+        n_latex = self.n.to_latex()
+        l_latex = self.l.to_latex()
+        r_latex = self.r.to_latex()
+        return f"R_{{{n_latex}{l_latex}}}\\left({r_latex}\\right)"
+
+
+class HydrogenOrbital(SpecialFunction):
+    """
+    Complete hydrogen-like orbital ψ_nlm(r, θ, φ).
+
+    ψ_nlm(r, θ, φ) = R_nl(r) × Y_l^m(θ, φ)
+
+    where R_nl is the radial wavefunction and Y_l^m is the spherical harmonic.
+
+    Example:
+        r, theta, phi = Math.var("r"), Math.var("theta"), Math.var("phi")
+        psi_210 = HydrogenOrbital(n=2, l=1, m=0, r=r, theta=theta, phi=phi)
+        psi_210.render()  # Displays 2p_z orbital
+    """
+    _name = "hydrogen_orbital"
+    _latex_name = r"\psi"
+    _sympy_func = None
+
+    def __init__(self, n: Union[int, Expr], l: Union[int, Expr], m: Union[int, Expr],
+                 r: Expr, theta: Expr, phi: Expr,
+                 Z: Union[int, float, Expr] = 1, a0: Union[float, Expr] = 1.0):
+        n_expr = _ensure_expr(n)
+        l_expr = _ensure_expr(l)
+        m_expr = _ensure_expr(m)
+        Z_expr = _ensure_expr(Z)
+        a0_expr = _ensure_expr(a0)
+        super().__init__(n_expr, l_expr, m_expr, r, theta, phi, Z_expr, a0_expr)
+
+    @property
+    def n(self) -> Expr:
+        return self.args[0]
+
+    @property
+    def l(self) -> Expr:
+        return self.args[1]
+
+    @property
+    def m(self) -> Expr:
+        return self.args[2]
+
+    @property
+    def r(self) -> Expr:
+        return self.args[3]
+
+    @property
+    def theta(self) -> Expr:
+        return self.args[4]
+
+    @property
+    def phi(self) -> Expr:
+        return self.args[5]
+
+    @property
+    def Z(self) -> Expr:
+        return self.args[6]
+
+    @property
+    def a0(self) -> Expr:
+        return self.args[7]
+
+    def radial_part(self) -> HydrogenRadial:
+        """Return just the radial part R_nl(r)."""
+        return HydrogenRadial(self.n, self.l, self.r, self.Z, self.a0)
+
+    def angular_part(self) -> SphericalHarmonic:
+        """Return just the angular part Y_l^m(θ, φ)."""
+        return SphericalHarmonic(self.l, self.m, self.theta, self.phi)
+
+    def to_sympy(self):
+        radial = self.radial_part().to_sympy()
+        angular = self.angular_part().to_sympy()
+        return radial * angular
+
+    def to_latex(self) -> str:
+        n_latex = self.n.to_latex()
+        l_latex = self.l.to_latex()
+        m_latex = self.m.to_latex()
+        return f"\\psi_{{{n_latex}{l_latex}{m_latex}}}"
+
+
+# =============================================================================
+# SLATER-TYPE AND GAUSSIAN-TYPE ORBITALS
+# =============================================================================
+
+
+class SlaterTypeOrbital(SpecialFunction):
+    """
+    Slater-type orbital (STO).
+
+    φ_STO(r, θ, φ) = N × r^(n-1) × e^(-ζr) × Y_l^m(θ, φ)
+
+    where:
+    - N is the normalization constant
+    - ζ (zeta) is the orbital exponent
+    - n is the principal quantum number
+    - Y_l^m is the spherical harmonic
+
+    STOs have correct nuclear cusp behavior but difficult two-center integrals.
+
+    Example:
+        r, theta, phi = Math.var("r"), Math.var("theta"), Math.var("phi")
+        sto = SlaterTypeOrbital(n=1, l=0, m=0, zeta=1.0, r=r, theta=theta, phi=phi)
+        sto.render()
+    """
+    _name = "slater_orbital"
+    _latex_name = r"\chi"
+    _sympy_func = None
+
+    def __init__(self, n: Union[int, Expr], l: Union[int, Expr], m: Union[int, Expr],
+                 zeta: Union[float, Expr], r: Expr, theta: Expr, phi: Expr):
+        n_expr = _ensure_expr(n)
+        l_expr = _ensure_expr(l)
+        m_expr = _ensure_expr(m)
+        zeta_expr = _ensure_expr(zeta)
+        super().__init__(n_expr, l_expr, m_expr, zeta_expr, r, theta, phi)
+
+    @property
+    def n(self) -> Expr:
+        return self.args[0]
+
+    @property
+    def l(self) -> Expr:
+        return self.args[1]
+
+    @property
+    def m(self) -> Expr:
+        return self.args[2]
+
+    @property
+    def zeta(self) -> Expr:
+        return self.args[3]
+
+    @property
+    def r(self) -> Expr:
+        return self.args[4]
+
+    @property
+    def theta(self) -> Expr:
+        return self.args[5]
+
+    @property
+    def phi(self) -> Expr:
+        return self.args[6]
+
+    def to_sympy(self):
+        import sympy as sp
+        from sympy import sqrt, factorial, exp, pi
+
+        n = self.n.to_sympy()
+        l = self.l.to_sympy()
+        m = self.m.to_sympy()
+        zeta = self.zeta.to_sympy()
+        r = self.r.to_sympy()
+        theta = self.theta.to_sympy()
+        phi = self.phi.to_sympy()
+
+        # Normalization: N = (2ζ)^(n+1/2) / sqrt((2n)!)
+        norm = (2 * zeta)**(n + sp.Rational(1, 2)) / sqrt(factorial(2 * n))
+
+        # Radial part
+        radial = r**(n - 1) * exp(-zeta * r)
+
+        # Angular part (spherical harmonic)
+        angular = sp.Ynm(l, m, theta, phi)
+
+        return norm * radial * angular
+
+    def to_latex(self) -> str:
+        n_latex = self.n.to_latex()
+        l_latex = self.l.to_latex()
+        m_latex = self.m.to_latex()
+        zeta_latex = self.zeta.to_latex()
+        return f"\\chi_{{{n_latex}{l_latex}{m_latex}}}^{{\\zeta={zeta_latex}}}"
+
+
+class GaussianTypeOrbital(SpecialFunction):
+    """
+    Gaussian-type orbital (GTO).
+
+    Cartesian form: φ_GTO = N × x^i × y^j × z^k × e^(-αr²)
+
+    where:
+    - N is the normalization constant
+    - α (alpha) is the orbital exponent
+    - (i, j, k) are Cartesian angular momenta with l = i + j + k
+
+    GTOs allow analytical two-center integrals but lack nuclear cusp.
+    Typically used in contracted form (linear combinations).
+
+    Example:
+        x, y, z = Math.var("x"), Math.var("y"), Math.var("z")
+        # s-type GTO (l=0)
+        gto_s = GaussianTypeOrbital(i=0, j=0, k=0, alpha=1.0, x=x, y=y, z=z)
+        # p_x GTO (l=1)
+        gto_px = GaussianTypeOrbital(i=1, j=0, k=0, alpha=1.0, x=x, y=y, z=z)
+    """
+    _name = "gaussian_orbital"
+    _latex_name = r"g"
+    _sympy_func = None
+
+    def __init__(self, i: Union[int, Expr], j: Union[int, Expr], k: Union[int, Expr],
+                 alpha: Union[float, Expr], x: Expr, y: Expr, z: Expr):
+        i_expr = _ensure_expr(i)
+        j_expr = _ensure_expr(j)
+        k_expr = _ensure_expr(k)
+        alpha_expr = _ensure_expr(alpha)
+        super().__init__(i_expr, j_expr, k_expr, alpha_expr, x, y, z)
+
+    @property
+    def i(self) -> Expr:
+        return self.args[0]
+
+    @property
+    def j(self) -> Expr:
+        return self.args[1]
+
+    @property
+    def k(self) -> Expr:
+        return self.args[2]
+
+    @property
+    def alpha(self) -> Expr:
+        return self.args[3]
+
+    @property
+    def x(self) -> Expr:
+        return self.args[4]
+
+    @property
+    def y(self) -> Expr:
+        return self.args[5]
+
+    @property
+    def z(self) -> Expr:
+        return self.args[6]
+
+    @property
+    def l(self) -> Expr:
+        """Total angular momentum l = i + j + k."""
+        return self.i + self.j + self.k
+
+    def to_sympy(self):
+        import sympy as sp
+        from sympy import sqrt, pi, exp, factorial2
+
+        i = self.i.to_sympy()
+        j = self.j.to_sympy()
+        k = self.k.to_sympy()
+        alpha = self.alpha.to_sympy()
+        x = self.x.to_sympy()
+        y = self.y.to_sympy()
+        z = self.z.to_sympy()
+
+        r_sq = x**2 + y**2 + z**2
+
+        # Normalization constant for Cartesian GTO
+        # N = (2α/π)^(3/4) × (4α)^((i+j+k)/2) / sqrt((2i-1)!!(2j-1)!!(2k-1)!!)
+        norm = ((2 * alpha / pi)**(sp.Rational(3, 4)) *
+                (4 * alpha)**((i + j + k) / 2) /
+                sqrt(factorial2(2*i - 1) * factorial2(2*j - 1) * factorial2(2*k - 1)))
+
+        return norm * x**i * y**j * z**k * exp(-alpha * r_sq)
+
+    def to_latex(self) -> str:
+        i_latex = self.i.to_latex()
+        j_latex = self.j.to_latex()
+        k_latex = self.k.to_latex()
+        alpha_latex = self.alpha.to_latex()
+        return f"g_{{{i_latex}{j_latex}{k_latex}}}^{{\\alpha={alpha_latex}}}"
+
+
+class ContractedGTO(Expr):
+    """
+    Contracted Gaussian-type orbital.
+
+    φ_CGTO = Σᵢ cᵢ × φ_GTO(αᵢ)
+
+    A linear combination of primitive GTOs with different exponents
+    but the same angular momentum.
+
+    Example:
+        x, y, z = Math.var("x"), Math.var("y"), Math.var("z")
+        # STO-3G style contraction for 1s
+        cgto = ContractedGTO(
+            i=0, j=0, k=0,
+            exponents=[3.42525, 0.62391, 0.16885],
+            coefficients=[0.15433, 0.53533, 0.44463],
+            x=x, y=y, z=z
+        )
+    """
+
+    def __init__(self, i: int, j: int, k: int,
+                 exponents: List[float], coefficients: List[float],
+                 x: Expr, y: Expr, z: Expr):
+        if len(exponents) != len(coefficients):
+            raise ValueError("Number of exponents must match number of coefficients")
+
+        self._i = i
+        self._j = j
+        self._k = k
+        self._exponents = exponents
+        self._coefficients = coefficients
+        self._x = x
+        self._y = y
+        self._z = z
+
+        # Build primitive GTOs
+        self._primitives = [
+            GaussianTypeOrbital(i, j, k, alpha, x, y, z)
+            for alpha in exponents
+        ]
+
+    @property
+    def n_primitives(self) -> int:
+        return len(self._exponents)
+
+    @property
+    def primitives(self) -> List[GaussianTypeOrbital]:
+        return self._primitives
+
+    @property
+    def coefficients(self) -> List[float]:
+        return self._coefficients
+
+    def to_sympy(self):
+        import sympy as sp
+        result = sp.Integer(0)
+        for coeff, prim in zip(self._coefficients, self._primitives):
+            result = result + coeff * prim.to_sympy()
+        return result
+
+    def to_latex(self) -> str:
+        terms = []
+        for coeff, prim in zip(self._coefficients, self._primitives):
+            terms.append(f"{coeff:.4f} \\cdot {prim.to_latex()}")
+        return " + ".join(terms)
+
+    def _get_free_variables(self) -> Set['Var']:
+        return self._x._get_free_variables() | self._y._get_free_variables() | self._z._get_free_variables()
 
 
 # =============================================================================

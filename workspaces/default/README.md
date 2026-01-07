@@ -25,13 +25,23 @@ Complete reference documentation for the `cm` library - a Python library for cre
   - [Math Builder Class](#math-builder-class)
   - [Notation Styles](#notation-styles)
   - [Chemistry Helpers](#chemistry-helpers)
+  - [Angular Momentum Coupling](#angular-momentum-coupling)
+  - [Differential Operators](#differential-operators)
+  - [Hydrogen Wavefunctions](#hydrogen-wavefunctions)
+  - [Basis Functions](#basis-functions)
 - [cm.qm Module](#cmqm-module)
+  - [Atoms](#atoms)
+  - [Electron Configurations](#electron-configurations)
+  - [Molecules](#molecules)
   - [Spin-Orbitals](#spin-orbitals)
   - [Slater Determinants](#slater-determinants)
   - [Overlaps with @ Operator](#overlaps-with--operator)
   - [Hamiltonian Matrix Elements](#hamiltonian-matrix-elements)
   - [Slater-Condon Rules](#slater-condon-rules)
   - [Relativistic Quantum Mechanics](#relativistic-quantum-mechanics)
+  - [Hamiltonian Builder](#hamiltonian-builder)
+  - [Matrix Expressions](#matrix-expressions)
+  - [CI Basis Generation](#ci-basis-generation)
 - [C++ Support](#c-support)
 - [Colormaps Reference](#colormaps-reference)
 - [Element Data Reference](#element-data-reference)
@@ -1657,12 +1667,507 @@ sqrt("x", n="3")    # ³√x
 
 ---
 
+### Angular Momentum Coupling
+
+Compute and render angular momentum coupling coefficients used in quantum mechanics.
+
+#### Clebsch-Gordan Coefficients
+
+```python
+from cm.symbols import ClebschGordan, Math
+
+# Create a Clebsch-Gordan coefficient ⟨j₁ m₁ j₂ m₂ | J M⟩
+cg = ClebschGordan(j1=1, m1=0, j2=1, m2=0, J=0, M=0)
+cg.render()  # Display LaTeX
+
+# Evaluate numerically
+value = cg.evaluate()  # Returns float
+
+# Using Math class
+j1, m1 = Math.var("j_1"), Math.var("m_1")
+cg_sym = Math.clebsch_gordan(j1, m1, 1, 0, 2, 0)
+cg_sym.render()
+```
+
+#### Wigner 3j, 6j, 9j Symbols
+
+```python
+from cm.symbols import Wigner3j, Wigner6j, Wigner9j, Math
+
+# Wigner 3j symbol (related to Clebsch-Gordan)
+w3j = Wigner3j(j1=1, j2=1, j3=0, m1=1, m2=-1, m3=0)
+w3j.render()
+value = w3j.evaluate()
+
+# Wigner 6j symbol (recoupling)
+w6j = Wigner6j(j1=1, j2=1, j3=2, j4=1, j5=1, j6=2)
+w6j.render()
+value = w6j.evaluate()
+
+# Wigner 9j symbol (coupling four angular momenta)
+w9j = Wigner9j(
+    j1=0.5, j2=0.5, j3=1,
+    j4=0.5, j5=0.5, j6=1,
+    j7=1, j8=1, j9=2
+)
+w9j.render()
+value = w9j.evaluate()
+
+# Using Math class shortcuts
+w3j = Math.wigner_3j(1, 1, 0, 1, -1, 0)
+w6j = Math.wigner_6j(1, 1, 2, 1, 1, 2)
+w9j = Math.wigner_9j(0.5, 0.5, 1, 0.5, 0.5, 1, 1, 1, 2)
+```
+
+---
+
+### Differential Operators
+
+Create and apply differential operators in Cartesian or spherical coordinates.
+
+#### Basic Operators
+
+```python
+from cm.symbols import PartialDerivative, Gradient, Laplacian, Math
+
+# Partial derivative
+x = Math.var("x")
+f = x**2
+df_dx = PartialDerivative(f, x)
+df_dx.render()  # ∂(x²)/∂x
+result = df_dx.apply()  # Symbolic result: 2x
+
+# Gradient (vector of partial derivatives)
+f = Math.var("f")
+grad_f = Gradient(f, variables=[x, Math.var("y"), Math.var("z")])
+grad_f.render()  # ∇f
+
+# Laplacian (∇²)
+lapl = Laplacian(f, coord_system='cartesian')
+lapl.render()  # ∇²f
+
+# Laplacian in spherical coordinates
+r, theta, phi = Math.var("r"), Math.var("theta"), Math.var("phi")
+lapl_sph = Laplacian(f, coord_system='spherical', variables=[r, theta, phi])
+lapl_sph.render()  # Full spherical Laplacian
+```
+
+#### Applying Operators
+
+```python
+from cm.symbols import Laplacian, Math
+
+r, theta, phi = Math.var("r"), Math.var("theta"), Math.var("phi")
+
+# Define a function
+psi = Math.exp(-r) * Math.Ylm(1, 0, theta, phi)
+
+# Apply Laplacian
+lapl = Laplacian(psi, coord_system='spherical', variables=[r, theta, phi])
+result = lapl.apply()
+result.render()
+```
+
+#### Operator Composition
+
+```python
+from cm.symbols import Laplacian, ScaledOperator, SumOperator, ComposedOperator
+
+# Scale an operator: -½∇²
+kinetic = ScaledOperator(Laplacian(f), -0.5)
+
+# Sum operators: ∇² + V
+potential = Math.var("V")
+hamiltonian = SumOperator(kinetic, potential)
+
+# Compose operators: A∘B (apply B then A)
+composed = ComposedOperator(op1, op2)
+```
+
+---
+
+### Hydrogen Wavefunctions
+
+Built-in hydrogen-like radial and full wavefunctions.
+
+#### Radial Wavefunctions
+
+```python
+from cm.symbols import HydrogenRadial, Math
+
+# R_{nl}(r) = radial wavefunction
+n, l = 2, 1  # 2p orbital
+r = Math.var("r")
+Z = Math.var("Z")
+a0 = Math.var("a_0")
+
+R = HydrogenRadial(n, l, r, Z=Z, a0=a0)
+R.render()  # Shows normalized radial function
+
+# Evaluate at specific point
+R_numeric = HydrogenRadial(2, 1, r, Z=1, a0=1)
+value = R_numeric.evaluate(r=1.0)
+
+# Get the symbolic expression
+expr = R.to_sympy()
+```
+
+#### Full Wavefunctions
+
+```python
+from cm.symbols import HydrogenOrbital, Math
+
+r, theta, phi = Math.var("r"), Math.var("theta"), Math.var("phi")
+
+# ψ_{nlm}(r,θ,φ) = R_{nl}(r) × Y_l^m(θ,φ)
+psi = HydrogenOrbital(n=2, l=1, m=0, r=r, theta=theta, phi=phi)
+psi.render()
+
+# Ground state (1s)
+psi_1s = HydrogenOrbital(1, 0, 0, r, theta, phi)
+
+# 2p_z (real combination)
+psi_2pz = HydrogenOrbital(2, 1, 0, r, theta, phi)
+
+# Evaluate probability density
+prob = (psi * psi.conjugate()).evaluate(r=1.0, theta=0.5, phi=0.0)
+```
+
+---
+
+### Basis Functions
+
+Create atomic orbital basis functions for electronic structure calculations.
+
+#### Slater-Type Orbitals (STOs)
+
+```python
+from cm.symbols import SlaterTypeOrbital, Math
+
+r = Math.var("r")
+theta, phi = Math.var("theta"), Math.var("phi")
+
+# Create an STO: χ = N × r^(n-1) × exp(-ζr) × Y_l^m(θ,φ)
+sto = SlaterTypeOrbital(
+    n=1, l=0, m=0,  # Quantum numbers
+    zeta=1.0,        # Orbital exponent
+    r=r, theta=theta, phi=phi
+)
+sto.render()
+
+# Common STOs
+sto_1s = SlaterTypeOrbital(n=1, l=0, m=0, zeta=1.0, r=r, theta=theta, phi=phi)
+sto_2p = SlaterTypeOrbital(n=2, l=1, m=0, zeta=0.5, r=r, theta=theta, phi=phi)
+
+# Evaluate
+value = sto.evaluate(r=1.0, theta=0.0, phi=0.0)
+
+# Get normalization constant
+N = sto.normalization
+```
+
+#### Gaussian-Type Orbitals (GTOs)
+
+```python
+from cm.symbols import GaussianTypeOrbital, Math
+
+x, y, z = Math.var("x"), Math.var("y"), Math.var("z")
+
+# Cartesian GTO: χ = N × x^i × y^j × z^k × exp(-α r²)
+gto = GaussianTypeOrbital(
+    i=0, j=0, k=0,  # Angular momentum (s-type: i+j+k=0)
+    alpha=0.5,       # Orbital exponent
+    x=x, y=y, z=z,
+    center=(0, 0, 0)  # Position
+)
+gto.render()
+
+# p-type GTOs
+gto_px = GaussianTypeOrbital(i=1, j=0, k=0, alpha=0.3, x=x, y=y, z=z)
+gto_py = GaussianTypeOrbital(i=0, j=1, k=0, alpha=0.3, x=x, y=y, z=z)
+gto_pz = GaussianTypeOrbital(i=0, j=0, k=1, alpha=0.3, x=x, y=y, z=z)
+
+# d-type GTO (d_xy)
+gto_dxy = GaussianTypeOrbital(i=1, j=1, k=0, alpha=0.2, x=x, y=y, z=z)
+
+# Evaluate
+value = gto.evaluate(x=0.5, y=0.5, z=0.0)
+```
+
+#### Contracted GTOs
+
+```python
+from cm.symbols import ContractedGTO, GaussianTypeOrbital, Math
+
+x, y, z = Math.var("x"), Math.var("y"), Math.var("z")
+
+# Create contracted GTO from primitives
+# χ = Σ cᵢ × gᵢ(r)
+primitives = [
+    (0.15432897, GaussianTypeOrbital(0, 0, 0, 3.42525091, x, y, z)),
+    (0.53532814, GaussianTypeOrbital(0, 0, 0, 0.62391373, x, y, z)),
+    (0.44463454, GaussianTypeOrbital(0, 0, 0, 0.16885540, x, y, z)),
+]
+
+contracted = ContractedGTO(primitives)
+contracted.render()
+
+# Alternative: from coefficients and exponents
+contracted = ContractedGTO.from_coefficients(
+    coefficients=[0.15432897, 0.53532814, 0.44463454],
+    exponents=[3.42525091, 0.62391373, 0.16885540],
+    i=0, j=0, k=0,  # s-type
+    x=x, y=y, z=z
+)
+
+# Evaluate
+value = contracted.evaluate(x=0.0, y=0.0, z=0.0)
+```
+
+---
+
 ## cm.qm Module
 
-The quantum mechanics module provides tools for working with Slater determinants, spin-orbitals, and matrix elements using spherical harmonic basis functions. It automatically applies Slater-Condon rules to simplify Hamiltonian matrix elements.
+The quantum mechanics module provides tools for working with atoms, molecules, Slater determinants, spin-orbitals, and matrix elements. It includes a powerful Hamiltonian builder for configuring terms and corrections, with support for both non-relativistic and relativistic calculations.
 
 ```python
 from cm import qm
+```
+
+### Atoms
+
+Create atoms with automatic electron configuration based on the aufbau principle.
+
+#### `qm.atom(element, position=(0,0,0), configuration=None, relativistic=False, charge=0)`
+
+Create an atom with nuclear charge and electron configuration.
+
+**Parameters:**
+- `element`: Element symbol (str) or atomic number (int)
+- `position`: (x, y, z) coordinates or Coordinate3D for symbolic geometry
+- `configuration`: Optional ElectronConfiguration (defaults to aufbau ground state)
+- `relativistic`: If True, use Dirac spinors instead of spin-orbitals
+- `charge`: Ion charge (positive for cations, negative for anions)
+
+```python
+from cm import qm
+
+# Create atoms by symbol
+C = qm.atom('C')
+print(C.Z)  # 6
+print(C.symbol)  # 'C'
+print(C.n_electrons)  # 6
+
+# Create with position
+H1 = qm.atom('H', position=(0, 0, 0))
+H2 = qm.atom('H', position=(0.74, 0, 0))
+
+# Create ions
+Fe2_plus = qm.atom('Fe', charge=2)  # Fe²⁺
+O2_minus = qm.atom('O', charge=-2)  # O²⁻
+
+# Create relativistic atoms (for heavy elements)
+Au = qm.atom('Au', relativistic=True)
+
+# Get electron configuration
+print(C.configuration.label)  # "1s² 2s² 2p²"
+```
+
+#### `qm.atoms(specs)`
+
+Create multiple atoms from a list of specifications.
+
+```python
+from cm import qm
+
+# Create water molecule atoms
+atoms = qm.atoms([
+    ('O', 0.000, 0.000, 0.117),
+    ('H', 0.756, 0.000, -0.469),
+    ('H', -0.756, 0.000, -0.469),
+])
+
+# With charges
+ions = qm.atoms([
+    ('Na', 0, 0, 0, 1),   # Na⁺
+    ('Cl', 2.8, 0, 0, -1), # Cl⁻
+])
+```
+
+#### Atom Methods
+
+```python
+from cm import qm
+
+C = qm.atom('C')
+
+# Get orbitals (non-relativistic)
+orbitals = C.orbitals  # List of SpinOrbital
+
+# Get spinors (relativistic)
+Au = qm.atom('Au', relativistic=True)
+spinors = Au.spinors  # List of DiracSpinor
+
+# Generate Slater determinant
+psi = C.slater_determinant()
+psi.render()
+
+# Generate Dirac determinant (relativistic)
+psi_rel = Au.dirac_determinant()
+
+# Convenient determinant() method chooses based on relativistic flag
+psi = C.determinant()  # SlaterDeterminant
+psi = Au.determinant()  # DiracDeterminant
+
+# Modify atom (returns new atom)
+C_excited = C.excite(from_orbital=(2, 0, 0, 1), to_orbital=(2, 1, 0, 1))
+C_ion = C.ionize()  # C⁺
+C_moved = C.with_position((1, 0, 0))
+C_rel = C.to_relativistic()
+
+# Visualization tuple for cm.views.molecule()
+print(C.to_molecule_tuple())  # ('C', 0, 0, 0)
+```
+
+### Electron Configurations
+
+Control electron configurations manually or use aufbau defaults.
+
+#### `qm.ground_state(n_electrons)`
+
+Get the ground state configuration for a given electron count.
+
+```python
+from cm import qm
+
+config = qm.ground_state(6)  # Carbon
+print(config.label)  # "1s² 2s² 2p²"
+print(config.n_electrons)  # 6
+```
+
+#### `qm.config_from_string(notation)`
+
+Parse electron configuration from standard notation.
+
+```python
+from cm import qm
+
+# Standard notation
+config = qm.config_from_string("1s2 2s2 2p2")
+
+# Noble gas core notation
+config = qm.config_from_string("[He] 2s2 2p2")
+config = qm.config_from_string("[Ne] 3s2 3p4")
+config = qm.config_from_string("[Ar] 3d10 4s2")
+
+# Use with atom
+C_excited = qm.atom('C', configuration=qm.config_from_string("1s2 2s1 2p3"))
+```
+
+#### `ElectronConfiguration` Class
+
+```python
+from cm import qm
+
+# Create manually
+config = qm.ElectronConfiguration.aufbau(6)  # 6 electrons
+config = qm.ElectronConfiguration.from_string("1s2 2s2 2p2")
+
+# Properties
+print(config.n_electrons)  # 6
+print(config.label)  # "1s² 2s² 2p²"
+print(config.latex_label)  # "1s^2\\,2s^2\\,2p^2"
+print(config.orbitals)  # List of (n, l, m, spin) tuples
+
+# Get relativistic spinor quantum numbers
+print(config.spinors)  # List of (n, kappa, mj) tuples
+
+# Modify (returns new configuration)
+excited = config.excite(from_orbital=(2, 0, 0, 1), to_orbital=(2, 1, 0, 1))
+ionized = config.ionize(n=1)  # Remove 1 electron
+added = config.add_electron()  # Add electron to next available
+```
+
+#### Element Data
+
+```python
+from cm import qm
+
+# Atomic numbers dict
+print(qm.ATOMIC_NUMBERS['C'])  # 6
+print(qm.ATOMIC_NUMBERS['Au'])  # 79
+
+# Element symbols dict
+print(qm.ELEMENT_SYMBOLS[6])   # 'C'
+print(qm.ELEMENT_SYMBOLS[79])  # 'Au'
+
+# Aufbau filling order
+print(qm.AUFBAU_ORDER)  # [(1,0), (2,0), (2,1), (3,0), ...]
+```
+
+### Molecules
+
+Create molecules from multiple atoms for multi-center calculations.
+
+#### `qm.molecule(atoms_with_positions)`
+
+Create a molecule from atom specifications.
+
+**Parameters:**
+- `atoms_with_positions`: List of tuples (element, x, y, z) or (element, x, y, z, charge)
+
+```python
+from cm import qm
+
+# Water molecule
+H2O = qm.molecule([
+    ('O', 0.000, 0.000, 0.117),
+    ('H', 0.756, 0.000, -0.469),
+    ('H', -0.756, 0.000, -0.469),
+])
+
+# Access atoms
+print(H2O.atoms)  # List of Atom objects
+print(H2O.n_electrons)  # Total electrons
+print(H2O.n_atoms)  # 3
+
+# Generate molecular Slater determinant
+psi = H2O.slater_determinant()
+
+# Symbolic geometry for optimization
+from cm import spherical_coord
+r = qm.Var('r')
+theta = qm.Var('theta')
+H2_sym = qm.molecule([
+    ('H', 0, 0, 0),
+    ('H', r, 0, 0),  # Symbolic bond length
+])
+```
+
+#### `Molecule` Class
+
+```python
+from cm import qm
+
+mol = qm.molecule([('H', 0, 0, 0), ('H', 0.74, 0, 0)])
+
+# Properties
+print(mol.atoms)  # List of Atom objects
+print(mol.n_atoms)  # 2
+print(mol.n_electrons)  # 2
+print(mol.positions)  # List of (x, y, z) tuples
+print(mol.geometry)  # Geometry summary
+
+# Determinants
+psi = mol.slater_determinant()
+psi_rel = mol.dirac_determinant()  # If all atoms are relativistic
+
+# Visualization
+print(mol.to_molecule_tuples())  # [('H', 0, 0, 0), ('H', 0.74, 0, 0)]
+mol.render()  # Uses cm.views.molecule()
+
+# Modify (returns new molecule)
+stretched = mol.with_geometry([('H', 0, 0, 0), ('H', 1.0, 0, 0)])
 ```
 
 ### Spin-Orbitals
@@ -2017,6 +2522,205 @@ H_DCB = qm.dirac_hamiltonian("coulomb_breit")
 # Overlaps
 overlap = config_1s2 @ config_1s2
 print(overlap.value)  # 1
+```
+
+---
+
+### Hamiltonian Builder
+
+Build configurable Hamiltonians with a fluent API. Add physical terms, corrections, and approximations.
+
+#### `qm.HamiltonianBuilder()`
+
+Create a Hamiltonian builder with fluent configuration methods.
+
+```python
+from cm import qm
+
+# Build a standard electronic Hamiltonian
+H = (qm.HamiltonianBuilder()
+     .with_kinetic()
+     .with_nuclear_attraction()
+     .with_coulomb()  # Includes exchange automatically
+     .build())
+
+# Use presets for common configurations
+H_elec = qm.HamiltonianBuilder.electronic()  # Kinetic + nuclear + Coulomb
+H_so = qm.HamiltonianBuilder.spin_orbit()     # Includes spin-orbit coupling
+H_rel = qm.HamiltonianBuilder.relativistic()  # Full relativistic corrections
+```
+
+#### Builder Methods
+
+```python
+from cm import qm
+
+builder = qm.HamiltonianBuilder()
+
+# Core terms
+builder.with_kinetic(mass=1.0)  # -1/(2m) ∇²
+builder.with_nuclear_attraction()  # -∑ Zₐ/rᵢₐ
+builder.with_coulomb()  # ∑ 1/rᵢⱼ + exchange
+
+# Spin-orbit and relativistic
+builder.with_spin_orbit(model='zeff')  # ξ(r) L·S
+builder.with_spin_orbit(model='sommerfeld')  # Full Sommerfeld
+builder.with_relativistic(correction='breit')  # Breit interaction
+builder.with_relativistic(correction='darwin')  # Darwin term
+builder.with_relativistic(correction='mass-velocity')  # Mass-velocity
+
+# External fields
+builder.with_external_field(field_type='electric', strength=0.01, direction=(0, 0, 1))
+builder.with_external_field(field_type='magnetic', strength=0.001, direction=(0, 0, 1))
+
+# Custom terms
+builder.with_custom(term=qm.HamiltonianTerm(
+    name="custom_potential",
+    symbol="V",
+    expression=some_expr
+))
+
+# Modify terms
+builder.scale('coulomb', factor=0.5)  # Scale a term
+builder.remove('spin_orbit')  # Remove a term
+
+# Build the Hamiltonian
+H = builder.build()
+```
+
+#### `HamiltonianTerm` Dataclass
+
+```python
+from cm import qm
+
+# Create custom terms
+term = qm.HamiltonianTerm(
+    name="spin_orbit",
+    symbol="H_{SO}",
+    expression=spin_orbit_expr,  # Symbolic expression
+    type="one_electron",  # or "two_electron"
+)
+```
+
+### Matrix Expressions
+
+Matrix elements return `MatrixExpression` objects that support analytical, numerical, and graph evaluation.
+
+#### `MatrixExpression` Class
+
+```python
+from cm import qm
+
+# Create determinants and Hamiltonian
+psi = qm.atom('C').slater_determinant()
+H = qm.HamiltonianBuilder.electronic().build()
+
+# Compute matrix element
+elem = psi @ H @ psi  # Returns MatrixExpression
+
+# Analytical form (symbolic)
+expr = elem.analytical()
+expr.render()  # Display LaTeX
+
+# Numerical evaluation
+energy = elem.numerical(Z=6, a0=1.0)  # Pass variable values
+
+# Lazy evaluation with ComputeGraph
+cg = elem.graph(Z=6)
+cg.render()  # Visualize graph
+result = cg.evaluate()
+
+# PyTorch compilation for GPU
+torch_fn = elem.compile(device='cuda')
+energies = torch_fn(Z=torch.tensor([6, 7, 8]))
+```
+
+#### `MolecularHamiltonian` Class
+
+Apply Hamiltonians to molecules.
+
+```python
+from cm import qm
+
+mol = qm.molecule([('H', 0, 0, 0), ('H', 0.74, 0, 0)])
+H = qm.HamiltonianBuilder.electronic().build()
+
+# Create molecular Hamiltonian
+mol_H = qm.MolecularHamiltonian(H, mol)
+
+# Generate Hamiltonian matrix over CI basis
+basis = mol.ci_basis(excitations=2)
+matrix = mol_H.matrix(basis)  # Returns HamiltonianMatrix
+
+# Diagonalize
+eigenvalues, eigenvectors = matrix.diagonalize()
+ground_state_energy = eigenvalues[0]
+```
+
+#### `HamiltonianMatrix` Class
+
+```python
+from cm import qm
+
+mol = qm.molecule([('H', 0, 0, 0), ('H', 0.74, 0, 0)])
+basis = mol.ci_basis(excitations=2)
+H = qm.HamiltonianBuilder.electronic().build()
+mol_H = qm.MolecularHamiltonian(H, mol)
+
+matrix = mol_H.matrix(basis)
+
+# Properties
+print(matrix.dimension)  # Size of matrix
+print(matrix.basis)  # List of determinants
+
+# Get individual elements
+elem = matrix[0, 1]  # MatrixExpression
+
+# Evaluate all elements numerically
+numpy_matrix = matrix.to_numpy(R=0.74)
+
+# Diagonalize
+eigenvalues, eigenvectors = matrix.diagonalize(R=0.74)
+
+# Render as LaTeX
+matrix.render()
+```
+
+### CI Basis Generation
+
+Generate configuration interaction basis sets from molecules.
+
+#### `Molecule.ci_basis()`
+
+Generate excited determinants for CI calculations.
+
+```python
+from cm import qm
+
+mol = qm.molecule([('H', 0, 0, 0), ('H', 0.74, 0, 0)])
+
+# Singles and doubles (CIS-D)
+basis = mol.ci_basis(excitations=2)
+print(len(basis))  # Number of determinants
+
+# Singles only (CIS)
+basis_s = mol.ci_basis(excitations=1)
+
+# Full CI (all excitations)
+basis_full = mol.ci_basis(excitations='full')
+
+# With frozen core
+basis = mol.ci_basis(excitations=2, frozen_core=2)  # Freeze 2 electrons
+
+# Active space
+basis = mol.ci_basis(
+    excitations=2,
+    active_space=(4, 6)  # (n_electrons, n_orbitals)
+)
+
+# Iterate over basis
+for det in basis:
+    det.render()
 ```
 
 ---

@@ -18,6 +18,15 @@ const executeCpp = require('./execute-cpp');
 const installCondaPackage = require('./install-conda-package');
 const removeCondaPackage = require('./remove-conda-package');
 
+// Benchmark database handlers
+const {
+  benchmarkFetch,
+  benchmarkIndex,
+  benchmarkSync,
+  benchmarkSearch,
+  benchmarkCompare
+} = require('./benchmark-fetch');
+
 // Registry of job types to handler functions
 const jobRegistry = new Map();
 
@@ -72,6 +81,13 @@ registerJob('create_vendor_environment', createVendorEnvironment);
 registerJob('execute_cpp', executeCpp);
 registerJob('install_conda_package', installCondaPackage);
 registerJob('remove_conda_package', removeCondaPackage);
+
+// Benchmark database jobs
+registerJob('benchmark_fetch', benchmarkFetch);
+registerJob('benchmark_index', benchmarkIndex);
+registerJob('benchmark_sync', benchmarkSync);
+registerJob('benchmark_search', benchmarkSearch);
+registerJob('benchmark_compare', benchmarkCompare);
 
 module.exports = {
   jobRegistry,

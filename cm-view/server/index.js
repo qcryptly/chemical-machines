@@ -1054,6 +1054,490 @@ app.get('/api/profile/:id/ssh-key', async (req, res) => {
   }
 });
 
+// ================== Benchmark Database API ==================
+
+// Search benchmark databases (Elasticsearch cache + PubChem)
+app.get('/api/benchmark/search', async (req, res) => {
+  const { q, sources, limit = 20 } = req.query;
+
+  if (!q) {
+    return res.status(400).json({ error: 'Query parameter "q" is required' });
+  }
+
+  try {
+    // First search Elasticsearch cache
+    const sourceList = sources ? sources.split(',') : ['pubchem', 'nist', 'qm9'];
+
+    const esResult = await esClient.search({
+      index: 'benchmark_molecules',
+      body: {
+        query: {
+          bool: {
+            should: [
+              { match: { name: { query: q, boost: 2 } } },
+              { term: { formula: { value: q.toUpperCase(), boost: 1.5 } } },
+              { term: { cas: q } },
+              { term: { smiles: q } },
+              { term: { inchi_key: q } }
+            ],
+            minimum_should_match: 1,
+            filter: [{ terms: { sources: sourceList } }]
+          }
+        },
+        size: parseInt(limit)
+      }
+    });
+
+    const cached = esResult.hits.hits.map(hit => ({
+      ...hit._source,
+      _score: hit._score
+    }));
+
+    if (cached.length > 0) {
+      return res.json({
+        status: 'cached',
+        results: cached,
+        total: cached.length
+      });
+    }
+
+    // If no cached results, submit search job to cm-compute
+    const response = await axios.post(`${COMPUTE_URL}/compute`, {
+      type: 'benchmark_search',
+      params: { query: q, sources: sourceList, limit: parseInt(limit) },
+      priority: 7
+    });
+
+    res.json({
+      status: 'searching',
+      jobId: response.data.jobId,
+      message: 'Search job submitted. Subscribe via WebSocket for results.'
+    });
+  } catch (error) {
+    // Elasticsearch index might not exist yet
+    if (error.statusCode === 404 || error.meta?.statusCode === 404) {
+      // No cache, submit search job
+      try {
+        const response = await axios.post(`${COMPUTE_URL}/compute`, {
+          type: 'benchmark_search',
+          params: { query: q, sources: sources?.split(',') || ['pubchem', 'nist', 'qm9'], limit: parseInt(limit) },
+          priority: 7
+        });
+
+        return res.json({
+          status: 'searching',
+          jobId: response.data.jobId,
+          message: 'Search job submitted. Subscribe via WebSocket for results.'
+        });
+      } catch (jobError) {
+        return res.status(500).json({ error: jobError.message });
+      }
+    }
+
+    console.error('Benchmark search error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get specific molecule data (returns cached or queues fetch)
+app.get('/api/benchmark/molecule/:identifier', async (req, res) => {
+  const { identifier } = req.params;
+  const { sources, workspaceId = '1' } = req.query;
+
+  try {
+    // Build query clauses - only include numeric fields if identifier is numeric
+    const shouldClauses = [
+      { term: { identifier } },
+      { term: { cas: identifier } },
+      { term: { smiles: identifier } },
+      { term: { inchi_key: identifier } },
+      { term: { 'name.keyword': identifier } },
+      { match: { name: identifier } }
+    ];
+
+    // Only search cid if identifier looks like a number
+    if (/^\d+$/.test(identifier)) {
+      shouldClauses.push({ term: { cid: parseInt(identifier, 10) } });
+    }
+
+    // Check Elasticsearch cache first
+    const esResult = await esClient.search({
+      index: 'benchmark_molecules',
+      body: {
+        query: {
+          bool: {
+            should: shouldClauses,
+            minimum_should_match: 1
+          }
+        },
+        size: 1
+      }
+    });
+
+    if (esResult.hits.hits.length > 0) {
+      const molecule = esResult.hits.hits[0]._source;
+      return res.json({
+        status: 'cached',
+        data: molecule,
+        cached_at: molecule.cached_at
+      });
+    }
+
+    // Not cached, submit fetch job
+    const response = await axios.post(`${COMPUTE_URL}/compute`, {
+      type: 'benchmark_fetch',
+      params: {
+        identifier,
+        sources: sources?.split(',') || ['pubchem', 'nist', 'qm9'],
+        workspaceId
+      },
+      priority: 8
+    });
+
+    res.json({
+      status: 'fetching',
+      jobId: response.data.jobId,
+      message: `Fetching data for ${identifier}. Subscribe via WebSocket for results.`
+    });
+  } catch (error) {
+    // Elasticsearch index might not exist
+    if (error.statusCode === 404 || error.meta?.statusCode === 404) {
+      try {
+        const response = await axios.post(`${COMPUTE_URL}/compute`, {
+          type: 'benchmark_fetch',
+          params: {
+            identifier,
+            sources: sources?.split(',') || ['pubchem', 'nist', 'qm9'],
+            workspaceId: workspaceId || '1'
+          },
+          priority: 8
+        });
+
+        return res.json({
+          status: 'fetching',
+          jobId: response.data.jobId,
+          message: `Fetching data for ${identifier}. Subscribe via WebSocket for results.`
+        });
+      } catch (jobError) {
+        return res.status(500).json({ error: jobError.message });
+      }
+    }
+
+    console.error('Benchmark fetch error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Compare computed values with benchmark data
+app.post('/api/benchmark/compare', async (req, res) => {
+  const { computed, identifier } = req.body;
+
+  if (!computed || !identifier) {
+    return res.status(400).json({
+      error: 'Request body must include "computed" properties and "identifier"'
+    });
+  }
+
+  try {
+    const response = await axios.post(`${COMPUTE_URL}/compute`, {
+      type: 'benchmark_compare',
+      params: { computed, identifier },
+      priority: 8
+    });
+
+    res.json({
+      status: 'comparing',
+      jobId: response.data.jobId,
+      message: 'Comparison job submitted. Subscribe via WebSocket for results.'
+    });
+  } catch (error) {
+    console.error('Benchmark compare error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Track active indexing jobs for status reporting
+const activeIndexingJobs = new Map(); // source -> { jobId, startedAt, progress }
+
+// Trigger benchmark database sync
+app.post('/api/benchmark/sync', async (req, res) => {
+  const { sources = ['qm9'], workspaceId = '1' } = req.body;
+
+  try {
+    const response = await axios.post(`${COMPUTE_URL}/compute`, {
+      type: 'benchmark_sync',
+      params: { sources, workspaceId },
+      priority: 3
+    });
+
+    const jobId = response.data.jobId;
+
+    // Track this as an active indexing job
+    for (const source of sources) {
+      activeIndexingJobs.set(source, {
+        source,
+        jobId,
+        startedAt: new Date().toISOString(),
+        progress: 0,
+        phase: 'starting',
+        details: {}
+      });
+    }
+
+    // Subscribe to job updates to track progress
+    if (computeWs && computeWs.readyState === WebSocket.OPEN) {
+      computeWs.send(JSON.stringify({ type: 'subscribe', jobId }));
+
+      // Set up handler to update progress and clean up when done
+      const handleSyncProgress = (message) => {
+        try {
+          const data = JSON.parse(message);
+          if (data.jobId === jobId) {
+            // Handle progress updates
+            if (data.stream === 'progress' || data.type === 'progress') {
+              for (const source of sources) {
+                const job = activeIndexingJobs.get(source);
+                if (job) {
+                  job.progress = data.data || data.progress || 0;
+                }
+              }
+            }
+            // Handle download_progress stream with detailed info
+            if (data.stream === 'download_progress') {
+              for (const source of sources) {
+                const job = activeIndexingJobs.get(source);
+                if (job && data.data) {
+                  job.phase = data.data.phase || job.phase;
+                  job.progress = data.data.progress || job.progress;
+                  job.details = data.data;
+                }
+              }
+            }
+            // Handle stdout for progress parsing
+            if (data.stream === 'stdout' && typeof data.data === 'string') {
+              for (const source of sources) {
+                const job = activeIndexingJobs.get(source);
+                if (job) {
+                  job.lastOutput = data.data;
+                }
+              }
+            }
+            // Cleanup on completion
+            if (data.stream === 'complete' || data.stream === 'result' || data.stream === 'error') {
+              // Clean up indexing jobs
+              for (const source of sources) {
+                activeIndexingJobs.delete(source);
+              }
+              computeWs.off('message', handleSyncProgress);
+            }
+          }
+        } catch {}
+      };
+      computeWs.on('message', handleSyncProgress);
+
+      // Timeout cleanup after 2 hours
+      setTimeout(() => {
+        for (const source of sources) {
+          activeIndexingJobs.delete(source);
+        }
+        computeWs.off('message', handleSyncProgress);
+      }, 2 * 60 * 60 * 1000);
+    }
+
+    res.json({
+      status: 'syncing',
+      jobId,
+      sources,
+      message: `Sync job submitted for: ${sources.join(', ')}. Use /api/benchmark/stats to check progress.`
+    });
+  } catch (error) {
+    console.error('Benchmark sync error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get benchmark database statistics
+app.get('/api/benchmark/stats', async (req, res) => {
+  try {
+    const stats = {
+      sources: {},
+      total_molecules: 0,
+      indexing: {},
+      index_exists: true
+    };
+
+    // Check for active indexing jobs
+    for (const [source, job] of activeIndexingJobs) {
+      stats.indexing[source] = {
+        jobId: job.jobId,
+        startedAt: job.startedAt,
+        progress: job.progress || 0,
+        phase: job.phase || 'starting',
+        details: job.details || {},
+        status: 'indexing'
+      };
+    }
+
+    // Count molecules per source
+    for (const source of ['pubchem', 'nist', 'qm9']) {
+      try {
+        const countResult = await esClient.count({
+          index: 'benchmark_molecules',
+          body: {
+            query: { term: { sources: source } }
+          }
+        });
+        stats.sources[source] = countResult.count;
+        stats.total_molecules += countResult.count;
+      } catch {
+        stats.sources[source] = 0;
+      }
+    }
+
+    res.json(stats);
+  } catch (error) {
+    // Index might not exist
+    if (error.statusCode === 404 || error.meta?.statusCode === 404) {
+      // Check if we're currently indexing
+      const indexingStatus = {};
+      for (const [source, job] of activeIndexingJobs) {
+        indexingStatus[source] = {
+          jobId: job.jobId,
+          startedAt: job.startedAt,
+          progress: job.progress || 0,
+          phase: job.phase || 'starting',
+          details: job.details || {},
+          status: 'indexing'
+        };
+      }
+
+      return res.json({
+        sources: { pubchem: 0, nist: 0, qm9: 0 },
+        total_molecules: 0,
+        index_exists: false,
+        indexing: indexingStatus,
+        note: Object.keys(indexingStatus).length > 0
+          ? 'Index is being created. Data will be available shortly.'
+          : 'No benchmark data indexed yet. Run benchmark.sync() to populate.'
+      });
+    }
+
+    console.error('Benchmark stats error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Check status of a specific molecule (is it indexed, indexing, or not found)
+app.get('/api/benchmark/status/:identifier', async (req, res) => {
+  const { identifier } = req.params;
+
+  try {
+    // Build query clauses - only include numeric fields if identifier is numeric
+    const shouldClauses = [
+      { term: { identifier } },
+      { term: { cas: identifier } },
+      { term: { smiles: identifier } },
+      { term: { inchi_key: identifier } },
+      { term: { 'name.keyword': identifier } },
+      { match: { name: identifier } }
+    ];
+
+    // Only search cid if identifier looks like a number
+    if (/^\d+$/.test(identifier)) {
+      shouldClauses.push({ term: { cid: parseInt(identifier, 10) } });
+    }
+
+    // Check if molecule exists in index
+    const esResult = await esClient.search({
+      index: 'benchmark_molecules',
+      body: {
+        query: {
+          bool: {
+            should: shouldClauses,
+            minimum_should_match: 1
+          }
+        },
+        size: 1,
+        _source: ['identifier', 'name', 'formula', 'sources', 'cached_at']
+      }
+    });
+
+    if (esResult.hits.hits.length > 0) {
+      const molecule = esResult.hits.hits[0]._source;
+      return res.json({
+        status: 'indexed',
+        exists: true,
+        molecule: {
+          identifier: molecule.identifier,
+          name: molecule.name,
+          formula: molecule.formula,
+          sources: molecule.sources,
+          cached_at: molecule.cached_at
+        }
+      });
+    }
+
+    // Not in index - check if we're currently syncing
+    const indexingJobs = Array.from(activeIndexingJobs.values());
+    if (indexingJobs.length > 0) {
+      return res.json({
+        status: 'indexing',
+        exists: false,
+        message: 'Database is currently being indexed. The molecule may become available soon.',
+        indexing_jobs: indexingJobs.map(j => ({
+          source: j.source,
+          jobId: j.jobId,
+          progress: j.progress,
+          phase: j.phase,
+          details: j.details,
+          startedAt: j.startedAt
+        }))
+      });
+    }
+
+    // Not found and not indexing
+    res.json({
+      status: 'not_found',
+      exists: false,
+      message: `Molecule "${identifier}" is not in the benchmark database. It can be fetched from external sources.`,
+      can_fetch: true
+    });
+
+  } catch (error) {
+    if (error.statusCode === 404 || error.meta?.statusCode === 404) {
+      // Index doesn't exist
+      const indexingJobs = Array.from(activeIndexingJobs.values());
+      if (indexingJobs.length > 0) {
+        return res.json({
+          status: 'indexing',
+          exists: false,
+          index_exists: false,
+          message: 'Benchmark index is being created. Please wait.',
+          indexing_jobs: indexingJobs.map(j => ({
+            source: j.source,
+            jobId: j.jobId,
+            progress: j.progress,
+            phase: j.phase,
+            details: j.details,
+            startedAt: j.startedAt
+          }))
+        });
+      }
+
+      return res.json({
+        status: 'no_index',
+        exists: false,
+        index_exists: false,
+        message: 'Benchmark database has not been initialized. Run benchmark.sync() first.',
+        can_fetch: true
+      });
+    }
+
+    console.error('Benchmark status error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // WebSocket connection to cm-compute
 let computeWs = null;
 const clientToCompute = new Map(); // Map client cell requests to compute responses

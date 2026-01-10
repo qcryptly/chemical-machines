@@ -7,6 +7,7 @@ Modules:
     views: HTML output rendering for cells and workspaces
     symbols: LaTeX math and symbol rendering with notation styles
     qm: Quantum mechanics - atoms, Slater determinants, spin-orbitals, matrix elements
+    data: Benchmark molecular databases (NIST, PubChem, QM9)
 
 Quick Start - Atoms:
     from cm import qm
@@ -30,6 +31,7 @@ See qm module docstring for more examples.
 from . import views
 from . import symbols
 from . import qm
+from . import data
 
 # Re-export commonly used classes from qm for convenience
 from .qm import (
@@ -187,6 +189,7 @@ __all__ = [
     'views',
     'symbols',
     'qm',
+    'data',
     # QM - Coordinate system
     'CoordinateType',
     'Coordinate3D',

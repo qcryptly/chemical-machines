@@ -136,6 +136,12 @@ class ComputeQueue {
           // Route stderr through job listener
           this.jobListener.write(job.id, StreamType.STDERR, message.data);
           break;
+
+        case 'custom':
+          // Route custom stream types through job listener
+          // message.stream contains the custom stream name (e.g., 'download_progress')
+          this.jobListener.write(job.id, message.stream, message.data);
+          break;
       }
     });
 

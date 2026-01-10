@@ -99,8 +99,17 @@ function createJobEmitter(jobId) {
       case 'progress':
         send('progress', { progress: data });
         break;
+      case 'download_progress':
+        // Custom stream type for detailed download progress
+        send('custom', { jobId, stream: 'download_progress', data });
+        break;
       default:
-        send('stdout', { jobId, data: String(data) });
+        // For other custom stream types, send as custom message
+        if (typeof data === 'object') {
+          send('custom', { jobId, stream: streamType, data });
+        } else {
+          send('stdout', { jobId, data: String(data) });
+        }
     }
   };
 }

@@ -1082,6 +1082,30 @@ async function start() {
       console.log(`cm-compute daemon listening on ${SOCKET_PATH}`);
     });
 
+    // Schedule benchmark database sync (every 24 hours)
+    const BENCHMARK_SYNC_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
+    setInterval(async () => {
+      logger.info('Starting scheduled benchmark sync');
+      try {
+        const job = await Job.create({
+          type: 'benchmark_sync',
+          params: { sources: ['qm9'], workspaceId: '1' },
+          priority: 1 // Low priority
+        });
+        computeQueue.enqueue({
+          id: job.id.toString(),
+          type: 'benchmark_sync',
+          params: job.params,
+          priority: job.priority
+        });
+        logger.info('Benchmark sync job enqueued', { jobId: job.id });
+      } catch (error) {
+        logger.error('Failed to schedule benchmark sync', { error: error.message });
+      }
+    }, BENCHMARK_SYNC_INTERVAL);
+
+    logger.info('Benchmark sync scheduled', { intervalHours: 24 });
+
     // Graceful shutdown
     process.on('SIGTERM', async () => {
       logger.info('SIGTERM received, shutting down gracefully');

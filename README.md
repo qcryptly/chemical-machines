@@ -14,10 +14,12 @@ Chemical Machines is a containerized platform for computational drug design that
 
 The platform consists of four main components orchestrated by supervisord:
 
-### 1. **Elasticsearch**
+### 1. **Elasticsearch + Kibana**
 - Caching layer for autocomplete and string search
 - Fast query performance for molecular structures and annotations
-- Port: 9200
+- Benchmark molecular database indexing (NIST, PubChem, QM9)
+- Elasticsearch Port: 9200
+- Kibana Port: 5601
 
 ### 2. **PostgreSQL**
 - Primary data persistence layer
@@ -52,10 +54,13 @@ git clone <repository-url>
 cd chemical-machines
 
 # Build and run
-docker-compose up -d
+docker compose up -d
 
 # Access the web interface
 open http://localhost:3000
+
+# Access Kibana (Elasticsearch UI)
+open http://localhost:5601
 ```
 
 ## Development
@@ -72,6 +77,27 @@ chemical-machines/
 │   ├── package.json
 │   ├── server/          # Express backend
 │   └── client/          # Vue.js frontend
+├── cm-libraries/        # Python libraries
+│   └── python/
+│       └── cm/          # Main Python package
+│           ├── symbols/ # Symbolic math (expressions, special functions)
+│           │   ├── core.py       # Expr, Var, Const, operators
+│           │   ├── functions.py  # Math factory, SymbolicFunction
+│           │   ├── special.py    # Bessel, Gamma, polynomials, etc.
+│           │   ├── operators.py  # Gradient, Laplacian
+│           │   ├── orbitals.py   # Hydrogen, Slater, Gaussian orbitals
+│           │   └── display.py    # LaTeX rendering
+│           ├── qm/      # Quantum mechanics
+│           │   ├── data.py        # Atomic constants
+│           │   ├── coordinates.py # 3D coordinate system
+│           │   ├── spinorbitals.py # SpinOrbital, SlaterDeterminant
+│           │   ├── relativistic.py # DiracSpinor, DiracDeterminant
+│           │   ├── atoms.py       # Atom, ElectronConfiguration
+│           │   ├── molecules.py   # Molecule class
+│           │   └── hamiltonian.py # HamiltonianBuilder
+│           └── views/   # Output and visualization
+│               ├── output.py        # html, text, log, clear
+│               └── visualization.py # molecule, scatter_3d, surface
 ├── docker/
 │   ├── Dockerfile
 │   └── supervisord.d/   # Supervisor configuration
@@ -202,9 +228,45 @@ gradients = grad_fn(x=1.0)
 Tools for many-electron quantum mechanics:
 
 ```python
+from cm import qm
+
+# Create atoms with automatic ground state configuration
+C = qm.atom('C')
+print(C.configuration.label)  # "1s² 2s² 2p²"
+
+# Access orbitals and create Slater determinant
+psi = C.slater_determinant()
+psi.render()
+
+# Build Hamiltonians
+H = (qm.HamiltonianBuilder()
+     .with_kinetic()
+     .with_nuclear_attraction()
+     .with_coulomb()
+     .build())
+
+# Calculate atomic energies
+E = C.energy(H).numerical()
+print(f"Carbon energy: {E:.2f} Ha")
+
+# Create molecules
+import math
+r = 0.9572  # O-H bond length in Angstroms
+theta = 104.52 * math.pi / 180
+water = qm.Molecule([
+    ('O', 0, 0, 0),
+    ('H', r, 0, 0),
+    ('H', r * math.cos(theta), r * math.sin(theta), 0),
+])
+E_water = water.energy(H).numerical()
+```
+
+Lower-level API for spin-orbitals:
+
+```python
 from cm.qm import SpinOrbital, SlaterDeterminant
 
-# Define spin-orbitals
+# Define spin-orbitals manually
 orbitals = [
     SpinOrbital("1s", spin="alpha"),
     SpinOrbital("1s", spin="beta"),
@@ -215,6 +277,68 @@ orbitals = [
 det = SlaterDeterminant(orbitals)
 det.render()  # Display in bra-ket notation
 ```
+
+## Kibana (Elasticsearch UI)
+
+Kibana provides a visual interface for exploring and managing Elasticsearch data, including the benchmark molecular database.
+
+### Accessing Kibana
+
+```bash
+# Start Kibana (if not already running)
+docker compose up -d kibana
+
+# Open in browser
+open http://localhost:5601
+```
+
+### Useful Features
+
+**Dev Tools** - Run Elasticsearch queries directly:
+```
+# Navigate to: Management > Dev Tools
+# Example queries:
+
+# Check cluster health
+GET _cluster/health
+
+# List all indices
+GET _cat/indices?v
+
+# Search benchmark molecules
+GET benchmark_molecules/_search
+{
+  "query": {
+    "match": { "name": "water" }
+  }
+}
+
+# Get index mapping
+GET benchmark_molecules/_mapping
+```
+
+**Discover** - Browse and filter indexed data:
+1. Go to Analytics > Discover
+2. Create a data view for `benchmark_molecules`
+3. Search and filter molecules interactively
+
+**Index Management** - View index stats:
+1. Go to Management > Stack Management > Index Management
+2. View document counts, storage size, and health status
+
+### Benchmark Data Index
+
+The `benchmark_molecules` index contains molecular data from:
+- **NIST CCCBDB**: Experimental geometries, energies, vibrational frequencies
+- **PubChem**: Molecular properties, 3D structures
+- **QM9**: Pre-computed DFT results (~134k molecules)
+
+Key fields:
+- `identifier`, `cas`, `smiles`, `inchi_key` - Molecule identifiers
+- `name`, `formula` - Human-readable info
+- `properties` - Nested array of computed/experimental values
+- `geometry` - XYZ coordinates
+- `sources` - Data sources (nist, pubchem, qm9)
 
 ## Configuration
 

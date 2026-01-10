@@ -12,12 +12,11 @@ services:
       - NODE_ENV=development
     ports:
       - "3000:3000"      # cm-view web interface
-      - "5173:5173"      # cm-view web interface
+      - "5173:5173"      # cm-view web interface (dev)
       - "5432:5432"      # PostgreSQL
       - "9200:9200"      # Elasticsearch
     volumes:
       - ./:/app
-
     deploy:
       resources:
         reservations:
@@ -26,3 +25,16 @@ services:
               count: all
               capabilities: [gpu]
 
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.15.0
+    container_name: kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://chemical-machines:9200
+      - XPACK_SECURITY_ENABLED=false
+      - SERVER_NAME=kibana
+      - SERVER_HOST=0.0.0.0
+    ports:
+      - "5601:5601"      # Kibana web interface
+    depends_on:
+      - chemical-machines
+    restart: unless-stopped

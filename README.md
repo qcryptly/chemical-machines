@@ -63,6 +63,35 @@ open http://localhost:3000
 open http://localhost:5601
 ```
 
+## Testing
+
+### Running Unit Tests
+
+The `cm-libraries` Python package includes a comprehensive test suite with 90+ tests covering all modules.
+
+```bash
+# Run all tests
+docker compose exec chemical-machines bash -c "cd /app/cm-libraries/python && PYTHONPATH=/app/cm-libraries/python python3 -m pytest tests/ -v"
+
+# Run specific module tests
+docker compose exec chemical-machines bash -c "cd /app/cm-libraries/python && PYTHONPATH=/app/cm-libraries/python python3 -m pytest tests/qm/ -v"
+docker compose exec chemical-machines bash -c "cd /app/cm-libraries/python && PYTHONPATH=/app/cm-libraries/python python3 -m pytest tests/symbols/ -v"
+docker compose exec chemical-machines bash -c "cd /app/cm-libraries/python && PYTHONPATH=/app/cm-libraries/python python3 -m pytest tests/data/ -v"
+
+# Run with coverage report
+docker compose exec chemical-machines bash -c "cd /app/cm-libraries/python && PYTHONPATH=/app/cm-libraries/python python3 -m pytest tests/ --cov=cm --cov-report=term-missing"
+
+# Run specific test
+docker compose exec chemical-machines bash -c "cd /app/cm-libraries/python && PYTHONPATH=/app/cm-libraries/python python3 -m pytest tests/qm/test_hamiltonian.py::TestHamiltonianBuilder::test_electronic_preset -v"
+```
+
+**Test Coverage:**
+- ✅ **Symbols** (18 tests): Variables, constants, sums, products, arithmetic operations, LaTeX rendering
+- ✅ **QM** (55 tests): Hamiltonians, spin-orbitals, Slater determinants, molecules, matrix elements
+- ✅ **Data** (17 tests): Benchmark API, molecular properties, comparison tools
+
+See [cm-libraries/python/tests/README.md](cm-libraries/python/tests/README.md) for detailed documentation.
+
 ## Development
 
 ### Project Structure

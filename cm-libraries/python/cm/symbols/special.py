@@ -1113,6 +1113,149 @@ class SphericalHarmonic(SpecialFunction):
         phi_latex = self.phi.to_latex()
         return f"Y_{{{l_latex}}}^{{{m_latex}}}\\left({theta_latex}, {phi_latex}\\right)"
 
+    def expand(self) -> Optional[Expr]:
+        """
+        Expand to explicit formula when l and m are concrete integers.
+
+        Returns:
+            Explicit expression, or None if l,m are symbolic
+        """
+        # Check if l and m are concrete values
+        if not isinstance(self.l, Const) or not isinstance(self.m, Const):
+            return None
+
+        l_val = int(self.l.value)
+        m_val = int(self.m.value)
+
+        # Import needed functions
+        from .core import Const as C
+        from . import Sin, Cos, Exp
+
+        # Get theta and phi variables
+        theta = self.theta
+        phi = self.phi
+
+        # Compute normalization constant
+        from math import factorial, pi, sqrt
+
+        # N_l^m = sqrt((2l+1)/(4π) * (l-|m|)!/(l+|m|)!)
+        abs_m = abs(m_val)
+        norm_sq = (2*l_val + 1) / (4*pi) * factorial(l_val - abs_m) / factorial(l_val + abs_m)
+        N = C(sqrt(norm_sq))
+
+        # Phase factor for m < 0 (Condon-Shortley convention)
+        if m_val < 0:
+            phase = C((-1)**abs_m)
+        else:
+            phase = C(1)
+
+        # Associated Legendre polynomial P_l^|m|(cos θ)
+        # We'll use explicit formulas for low l,m values
+        cos_theta = Cos(theta)
+        sin_theta = Sin(theta)
+
+        # Build P_l^|m|(x) where x = cos(θ)
+        P_lm = self._legendre_poly(l_val, abs_m, cos_theta, sin_theta)
+
+        # Azimuthal part: exp(i*m*φ)
+        if m_val != 0:
+            # Use SymbolicConst for the imaginary unit
+            from .core import SymbolicConst
+            I = SymbolicConst("I")  # imaginary unit
+            exp_part = Exp(I * C(m_val) * phi)
+        else:
+            exp_part = C(1)
+
+        # Combine: N * P_l^|m|(cos θ) * exp(i*m*φ) * phase
+        result = phase * N * P_lm * exp_part
+        return result
+
+    def _legendre_poly(self, l: int, m: int, cos_theta: Expr, sin_theta: Expr) -> Expr:
+        """
+        Generate associated Legendre polynomial P_l^m(cos θ).
+
+        Uses explicit formulas for l <= 3.
+        """
+        from .core import Const as C
+        from . import Pow
+
+        x = cos_theta  # cos(θ)
+        sx = sin_theta  # sin(θ)
+
+        # P_l^m(x) formulas
+        if l == 0 and m == 0:
+            return C(1)
+
+        elif l == 1:
+            if m == 0:
+                return x
+            elif m == 1:
+                return -sx
+
+        elif l == 2:
+            if m == 0:
+                # (3x² - 1)/2
+                return (C(3) * Pow(x, C(2)) - C(1)) * C(0.5)
+            elif m == 1:
+                # -3x*sin(θ)
+                return C(-3) * x * sx
+            elif m == 2:
+                # 3*sin²(θ)
+                return C(3) * Pow(sx, C(2))
+
+        elif l == 3:
+            if m == 0:
+                # (5x³ - 3x)/2
+                return (C(5) * Pow(x, C(3)) - C(3) * x) * C(0.5)
+            elif m == 1:
+                # -3(5x² - 1)*sin(θ)/2
+                return C(-1.5) * (C(5) * Pow(x, C(2)) - C(1)) * sx
+            elif m == 2:
+                # 15x*sin²(θ)
+                return C(15) * x * Pow(sx, C(2))
+            elif m == 3:
+                # -15*sin³(θ)
+                return C(-15) * Pow(sx, C(3))
+
+        # For higher l, fall back to SymPy (won't expand)
+        return None
+
+    def conjugate(self) -> Expr:
+        """
+        Return complex conjugate of spherical harmonic.
+
+        For Y_l^m, the conjugate is: Y_l^m* = (-1)^m * Y_l^{-m}
+
+        However, when l,m are concrete, we expand and conjugate the explicit formula.
+        """
+        # If l,m are concrete, expand and conjugate the result
+        expanded = self.expand()
+        if expanded is not None:
+            # Use the base class conjugate on the expanded form
+            return expanded.conjugate()
+
+        # For symbolic l,m, use the mathematical formula:
+        # Y_l^m* = (-1)^m * Y_l^{-m}
+        # But since we don't support negative m in our expansion,
+        # we'll use SymPy's conjugate and wrap it
+        from .core import SympyWrapper, _get_sympy
+        sp = _get_sympy()
+        sympy_ylm = self.to_sympy()
+        conjugated = sp.conjugate(sympy_ylm)
+        return SympyWrapper(conjugated)
+
+    def to_sympy(self):
+        """Convert to SymPy, with expansion if possible."""
+        # Try to expand first
+        expanded = self.expand()
+        if expanded is not None:
+            return expanded.to_sympy()
+
+        # Fall back to Ynm
+        sp = _get_sympy()
+        sympy_args = [arg.to_sympy() for arg in self.args]
+        return sp.Ynm(*sympy_args)
+
 
 class RealSphericalHarmonic(SpecialFunction):
     """

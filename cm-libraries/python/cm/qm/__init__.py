@@ -92,6 +92,11 @@ from .hamiltonian import (
     HamiltonianMatrix,
 )
 
+# Orthogonality utilities
+from .orthogonality import (
+    spherical_harmonic_orthogonality,
+)
+
 __all__ = [
     # Coordinate system
     'CoordinateType',
@@ -144,4 +149,6 @@ __all__ = [
     'MolecularHamiltonian',
     'MatrixExpression',
     'HamiltonianMatrix',
+    # Orthogonality utilities
+    'spherical_harmonic_orthogonality',
 ]

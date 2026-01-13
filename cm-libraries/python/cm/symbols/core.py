@@ -7,6 +7,9 @@ Core expression tree classes for symbolic computation.
 from typing import Optional, List, Union, Dict, Set, Tuple, Callable, Any
 from abc import ABC, abstractmethod
 
+# Import views for rendering
+from .. import views
+
 __all__ = [
     # Core classes
     'EvaluationError',
@@ -135,6 +138,12 @@ class Expr(ABC):
         expanded = sp.expand(self.to_sympy())
         return SympyWrapper(expanded)
 
+    def conjugate(self) -> 'Expr':
+        """Return complex conjugate of expression."""
+        sp = _get_sympy()
+        conjugated = sp.conjugate(self.to_sympy())
+        return SympyWrapper(conjugated)
+
     def integrate(self, var: 'Var', bounds: Optional[List] = None) -> 'Integral':
         """
         Integrate expression with respect to variable.
@@ -252,7 +261,13 @@ class Expr(ABC):
         # Try to evaluate numerically
         try:
             # First try: get numeric value from SymPy
-            numeric_result = float(result_expr.evalf())
+            evaled = result_expr.evalf()
+
+            # Check if result is complex
+            if evaled.is_complex or evaled.has(sp.I):
+                numeric_result = complex(evaled)
+            else:
+                numeric_result = float(evaled)
 
             # Try to return as torch tensor if available
             try:
@@ -261,7 +276,7 @@ class Expr(ABC):
             except ImportError:
                 return numeric_result
 
-        except (TypeError, ValueError) as e:
+        except (TypeError, ValueError, AttributeError) as e:
             # If evalf fails, try lambdify with numpy
             try:
                 sorted_names = sorted(kwargs.keys())
@@ -274,9 +289,16 @@ class Expr(ABC):
                 try:
                     torch = _get_torch()
                     if not isinstance(result, torch.Tensor):
-                        result = torch.tensor(float(result))
+                        # Handle complex results
+                        if isinstance(result, complex):
+                            result = torch.tensor(result)
+                        else:
+                            result = torch.tensor(float(result))
                     return result
                 except ImportError:
+                    # Return as-is if it's complex, otherwise convert to float
+                    if isinstance(result, complex):
+                        return result
                     return float(result)
 
             except Exception as e2:
@@ -402,7 +424,9 @@ class Var(Expr):
     def to_sympy(self):
         if self._sympy_symbol is None:
             sp = _get_sympy()
-            self._sympy_symbol = sp.Symbol(self.name)
+            # Mark all variables as real by default for proper conjugation and integration
+            # This is standard practice in quantum mechanics where coordinates are real
+            self._sympy_symbol = sp.Symbol(self.name, real=True)
         return self._sympy_symbol
 
     def to_latex(self) -> str:
@@ -451,10 +475,34 @@ class Const(Expr):
         return sp.Number(self.value)
 
     def to_latex(self) -> str:
+        if isinstance(self.value, complex):
+            # Handle complex numbers
+            real = self.value.real
+            imag = self.value.imag
+            if abs(real) < 1e-10:
+                # Pure imaginary
+                if abs(imag - 1.0) < 1e-10:
+                    return "i"
+                elif abs(imag + 1.0) < 1e-10:
+                    return "-i"
+                else:
+                    return f"{imag:.6g}i"
+            elif abs(imag) < 1e-10:
+                # Pure real
+                if abs(real - int(real)) < 1e-10:
+                    return str(int(real))
+                return f"{real:.6g}"
+            else:
+                # Both real and imaginary
+                if imag > 0:
+                    return f"({real:.6g} + {imag:.6g}i)"
+                else:
+                    return f"({real:.6g} - {abs(imag):.6g}i)"
+
         if isinstance(self.value, int):
             return str(self.value)
         # Format float nicely
-        if self.value == int(self.value):
+        if abs(self.value - int(self.value)) < 1e-10:
             return str(int(self.value))
         return f"{self.value:.6g}"
 
@@ -807,9 +855,22 @@ class Integral(Expr):
             elif upper == float('inf'):
                 upper = sp.oo
 
-            return sp.integrate(integrand_sympy, (var_sympy, lower, upper))
+            # Try to evaluate the integral, but return unevaluated if it fails
+            try:
+                result = sp.integrate(integrand_sympy, (var_sympy, lower, upper))
+                # Check if SymPy actually integrated or just returned an Integral object
+                if isinstance(result, sp.Integral):
+                    # Integration failed - return unevaluated
+                    return result
+                return result
+            except Exception:
+                # Integration raised an exception - return unevaluated Integral
+                return sp.Integral(integrand_sympy, (var_sympy, lower, upper))
         else:
-            return sp.integrate(integrand_sympy, var_sympy)
+            try:
+                return sp.integrate(integrand_sympy, var_sympy)
+            except Exception:
+                return sp.Integral(integrand_sympy, var_sympy)
 
     def to_latex(self) -> str:
         integrand_latex = self.integrand.to_latex()
@@ -847,9 +908,204 @@ class Integral(Expr):
 
         return free_vars
 
+    def _sympy_to_expr(self, sympy_expr, **kwargs) -> Expr:
+        """
+        Convert a SymPy expression back to our native expression tree.
+
+        Specifically detects Ynm objects with concrete l,m and converts them
+        to SphericalHarmonic with expansion.
+        """
+        sp = _get_sympy()
+        from ..symbols.special import SphericalHarmonic
+
+        # Handle Ynm specifically
+        if isinstance(sympy_expr, sp.Ynm):
+            # Extract l, m, theta, phi from Ynm
+            l_val, m_val, theta_sym, phi_sym = sympy_expr.args
+
+            # Convert to Const if they're numbers
+            if l_val.is_number:
+                l_expr = Const(int(l_val))
+            else:
+                l_expr = Var(str(l_val))
+
+            if m_val.is_number:
+                m_expr = Const(int(m_val))
+            else:
+                m_expr = Var(str(m_val))
+
+            # Convert theta and phi
+            theta_expr = self._sympy_to_expr(theta_sym, **kwargs) if hasattr(theta_sym, 'is_symbol') else Var(str(theta_sym))
+            phi_expr = self._sympy_to_expr(phi_sym, **kwargs) if hasattr(phi_sym, 'is_symbol') else Var(str(phi_sym))
+
+            # Create SphericalHarmonic and try to expand
+            ylm = SphericalHarmonic(l_expr, m_expr, theta_expr, phi_expr)
+            expanded = ylm.expand()
+            return expanded if expanded else ylm
+
+        # Handle basic operations
+        elif isinstance(sympy_expr, sp.Mul):
+            # Multiply: recursively convert all args
+            result = Const(1)
+            for arg in sympy_expr.args:
+                result = result * self._sympy_to_expr(arg, **kwargs)
+            return result
+
+        elif isinstance(sympy_expr, sp.Add):
+            # Add: recursively convert all args
+            result = Const(0)
+            for arg in sympy_expr.args:
+                result = result + self._sympy_to_expr(arg, **kwargs)
+            return result
+
+        elif isinstance(sympy_expr, sp.Pow):
+            # Power: recursively convert base and exponent
+            base = self._sympy_to_expr(sympy_expr.args[0], **kwargs)
+            exp = self._sympy_to_expr(sympy_expr.args[1], **kwargs)
+            from . import Pow
+            return Pow(base, exp)
+
+        elif isinstance(sympy_expr, sp.exp):
+            # Exponential
+            from . import Exp
+            arg = self._sympy_to_expr(sympy_expr.args[0], **kwargs)
+            return Exp(arg)
+
+        elif isinstance(sympy_expr, sp.sin):
+            from . import Sin
+            arg = self._sympy_to_expr(sympy_expr.args[0], **kwargs)
+            return Sin(arg)
+
+        elif isinstance(sympy_expr, sp.cos):
+            from . import Cos
+            arg = self._sympy_to_expr(sympy_expr.args[0], **kwargs)
+            return Cos(arg)
+
+        elif isinstance(sympy_expr, sp.Symbol):
+            # Symbol: convert to Var
+            return Var(str(sympy_expr))
+
+        elif isinstance(sympy_expr, sp.Integer):
+            return Const(int(sympy_expr))
+
+        elif isinstance(sympy_expr, (sp.Float, sp.Rational)):
+            return Const(float(sympy_expr))
+
+        elif sympy_expr == sp.I:
+            # Imaginary unit
+            return SymbolicConst("I")
+
+        else:
+            # For anything else, wrap it
+            return SympyWrapper(sympy_expr)
+
+    def _substitute_and_expand(self, expr: Expr, **kwargs) -> Expr:
+        """
+        Substitute values into expression and expand special functions.
+
+        This is crucial for SphericalHarmonic: substituting l,m values allows
+        expansion to explicit formulas that can be integrated symbolically.
+        """
+        from ..symbols.special import SphericalHarmonic
+
+        # Recursively process the expression tree
+        if isinstance(expr, SphericalHarmonic):
+            # Substitute values in l and m
+            l_sub = self._substitute_and_expand(expr.l, **kwargs) if isinstance(expr.l, Expr) else expr.l
+            m_sub = self._substitute_and_expand(expr.m, **kwargs) if isinstance(expr.m, Expr) else expr.m
+
+            # If l,m are now concrete after substitution, create new SphericalHarmonic and expand
+            if isinstance(l_sub, Const) and isinstance(m_sub, Const):
+                new_ylm = SphericalHarmonic(l_sub, m_sub, expr.theta, expr.phi)
+                expanded = new_ylm.expand()
+                if expanded:
+                    return expanded
+
+            # Return with substituted l,m even if can't expand
+            if l_sub != expr.l or m_sub != expr.m:
+                return SphericalHarmonic(l_sub, m_sub, expr.theta, expr.phi)
+            return expr
+
+        elif isinstance(expr, Var):
+            # Replace variable with its value if provided
+            if expr.name in kwargs:
+                return Const(kwargs[expr.name])
+            return expr
+
+        elif isinstance(expr, (Const, SymbolicConst)):
+            return expr
+
+        elif isinstance(expr, BinOp):
+            # Recursively substitute in left and right
+            left_sub = self._substitute_and_expand(expr.left, **kwargs)
+            right_sub = self._substitute_and_expand(expr.right, **kwargs)
+            if left_sub != expr.left or right_sub != expr.right:
+                return expr.__class__(left_sub, right_sub)
+            return expr
+
+        elif isinstance(expr, UnaryOp):
+            # Recursively substitute in operand
+            operand_sub = self._substitute_and_expand(expr.operand, **kwargs)
+            if operand_sub != expr.operand:
+                return expr.__class__(operand_sub)
+            return expr
+
+        elif isinstance(expr, Integral):
+            # Recursively substitute in integrand AND bounds
+            integrand_sub = self._substitute_and_expand(expr.integrand, **kwargs)
+
+            # Substitute in bounds too
+            bounds_sub = expr.bounds
+            if bounds_sub is not None:
+                new_lower = self._substitute_and_expand(bounds_sub[0], **kwargs) if isinstance(bounds_sub[0], Expr) else bounds_sub[0]
+                new_upper = self._substitute_and_expand(bounds_sub[1], **kwargs) if isinstance(bounds_sub[1], Expr) else bounds_sub[1]
+                bounds_sub = [new_lower, new_upper]
+
+            if integrand_sub != expr.integrand or bounds_sub != expr.bounds:
+                return Integral(integrand_sub, expr.var, bounds_sub)
+            return expr
+
+        elif isinstance(expr, SympyWrapper):
+            # SympyWrapper contains a SymPy expression that might have Ynm(l, m, ...)
+            # We need to substitute at the SymPy level and convert back to our tree
+            sp = _get_sympy()
+            sympy_expr = expr._sympy_expr
+
+            # Substitute l, m, l_p, m_p values in the SymPy expression
+            subs_dict = {}
+            for name, value in kwargs.items():
+                subs_dict[sp.Symbol(name, real=True)] = value
+
+            if subs_dict:
+                substituted_sympy = sympy_expr.subs(subs_dict)
+
+                # CRITICAL: Convert back to our expression tree
+                # This allows us to detect Ynm with concrete l,m and expand them
+                try:
+                    converted = self._sympy_to_expr(substituted_sympy, **kwargs)
+                    return converted
+                except Exception:
+                    # If conversion fails, just wrap it
+                    return SympyWrapper(substituted_sympy)
+            return expr
+
+        else:
+            # For other expression types, try to recurse through common attributes
+            if hasattr(expr, 'args'):
+                new_args = tuple(
+                    self._substitute_and_expand(arg, **kwargs) if isinstance(arg, Expr) else arg
+                    for arg in expr.args
+                )
+                if new_args != expr.args:
+                    return expr.__class__(*new_args)
+            return expr
+
     def evaluate(self, **kwargs) -> Any:
         """
         Numerically evaluate the integral.
+
+        First substitutes parameter values and expands special functions,
+        then performs symbolic integration via SymPy, then evaluates numerically.
 
         Raises:
             EvaluationError: If integral is indefinite or has unresolved symbolic bounds
@@ -873,8 +1129,103 @@ class Integral(Expr):
                             f"Expression: {self.to_latex()}"
                         )
 
-        # Use parent evaluate method
-        return super().evaluate(**kwargs)
+        # CRITICAL ARCHITECTURAL CHANGE:
+        # Apply ALL substitutions and expansions to the ENTIRE expression tree
+        # BEFORE any conversion to SymPy. This ensures SphericalHarmonic objects
+        # with symbolic l,m get their values substituted and then expanded,
+        # all within our own expression tree before SymPy ever sees them.
+
+        if kwargs:
+            # Recursively substitute and expand the ENTIRE integral (including nested ones)
+            expanded_integral = self._substitute_and_expand(self, **kwargs)
+        else:
+            expanded_integral = self
+
+        # Now convert to SymPy - at this point all SphericalHarmonics should be expanded
+        sp = _get_sympy()
+        sympy_expr = expanded_integral.to_sympy()
+
+        # No need for further substitution - everything was done in our expression tree
+        sympy_expr_subs = sympy_expr
+
+        # Try symbolic integration first
+        # For nested integrals, use doit() which evaluates step-by-step
+        integrated = None
+        try:
+            integrated = sympy_expr_subs.doit()
+        except Exception as e:
+            # If doit fails (including SymPy algorithm failures), try sp.integrate
+            try:
+                integrated = sp.integrate(sympy_expr_subs)
+            except Exception as e2:
+                # Both failed - will fall back to numerical
+                pass
+
+        # Check if symbolic integration actually worked
+        # If the result still contains Integral, it failed
+        if integrated is None or (hasattr(integrated, 'has') and integrated.has(sp.Integral)):
+            # Symbolic integration failed - use numerical integration
+            # This is common for special functions like spherical harmonics
+            try:
+                # Use SymPy's numerical integration
+                result_numeric = sympy_expr_subs.evalf()
+
+                # Extract real and imaginary parts
+                if hasattr(result_numeric, 'as_real_imag'):
+                    re_part, im_part = result_numeric.as_real_imag()
+
+                    try:
+                        re_val = float(re_part.evalf())
+                    except:
+                        re_val = 0.0
+
+                    try:
+                        im_val = float(im_part.evalf())
+                    except:
+                        im_val = 0.0
+
+                    # Return real if imaginary is negligible
+                    if abs(im_val) < 1e-10:
+                        return re_val
+                    return complex(re_val, im_val)
+                else:
+                    return float(result_numeric)
+            except Exception as e:
+                raise EvaluationError(
+                    f"Both symbolic and numerical integration failed: {e}\n"
+                    f"Expression: {self.to_latex()}"
+                )
+
+        # Symbolic integration succeeded - evaluate the result
+        try:
+            evaled = integrated.evalf(20)  # Use 20 digits precision
+
+            # Extract real and imaginary parts separately
+            if hasattr(evaled, 'as_real_imag'):
+                re_part, im_part = evaled.as_real_imag()
+
+                try:
+                    re_val = float(re_part.evalf())
+                except:
+                    re_val = 0.0
+
+                try:
+                    im_val = float(im_part.evalf())
+                except:
+                    im_val = 0.0
+
+                # Return real if imaginary is negligible
+                if abs(im_val) < 1e-10:
+                    return re_val
+                return complex(re_val, im_val)
+            else:
+                return float(evaled)
+        except Exception as e:
+            raise EvaluationError(
+                f"Numerical evaluation of symbolic result failed: {e}\n"
+                f"Expression: {self.to_latex()}\n"
+                f"Integrated: {integrated}"
+            )
 
 
 class Derivative(Expr):

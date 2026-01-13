@@ -113,7 +113,11 @@ function handleDoubleClick() {
 }
 
 function showContextMenu(event) {
-  emit('select', props.item)
+  // Only emit select if the item is not already selected or there's only one item selected
+  // This preserves multi-selection when right-clicking on an already-selected item
+  if (!props.selectedPaths.has(props.item.path) || props.selectedPaths.size === 1) {
+    emit('select', props.item)
+  }
   emit('context-menu', { item: props.item, x: event.clientX, y: event.clientY })
 }
 

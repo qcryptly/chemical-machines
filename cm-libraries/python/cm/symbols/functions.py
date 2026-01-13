@@ -17,6 +17,37 @@ from .core import (
     _ensure_expr, _get_sympy, _get_torch,
 )
 
+from .special import (
+    # Gamma and related
+    Gamma, LogGamma, Digamma, Beta,
+    Factorial, DoubleFactorial, Binomial,
+    # Error functions
+    Erf, Erfc, Erfi,
+    # Bessel functions
+    BesselJ, BesselY, BesselI, BesselK,
+    SphericalBesselJ, SphericalBesselY,
+    Hankel1, Hankel2,
+    # Airy functions
+    AiryAi, AiryBi, AiryAiPrime, AiryBiPrime,
+    # Orthogonal polynomials
+    Legendre, AssocLegendre,
+    Hermite, HermiteProb,
+    Laguerre, AssocLaguerre,
+    Chebyshev1, Chebyshev2,
+    Gegenbauer, Jacobi,
+    # Spherical harmonics
+    SphericalHarmonic, RealSphericalHarmonic,
+    # Hypergeometric functions
+    Hypergeometric2F1, Hypergeometric1F1,
+    Hypergeometric0F1, HypergeometricPFQ,
+    # Elliptic integrals
+    EllipticK, EllipticE, EllipticPi,
+    # Other special functions
+    Zeta, PolyLog,
+    DiracDelta, Heaviside,
+    KroneckerDelta, LeviCivita,
+)
+
 __all__ = [
     'Math',
     'Scalar',

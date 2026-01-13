@@ -68,6 +68,8 @@ _HTML_TEMPLATE = '''<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     <style>
         body {{
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -121,6 +123,18 @@ _HTML_TEMPLATE = '''<!DOCTYPE html>
         .cm-success {{
             border-left-color: #388e3c;
             background: #e8f5e9;
+        }}
+        .cm-math {{
+            margin: 1rem 0;
+        }}
+        .cm-math-center {{
+            text-align: center;
+        }}
+        .cm-math-left {{
+            text-align: left;
+        }}
+        .cm-math-right {{
+            text-align: right;
         }}
     </style>
 </head>
@@ -210,18 +224,19 @@ def _add_output(content: str):
     _write_outputs()
 
 
-def html(content: str):
+def html(content):
     """
     Output raw HTML content.
 
     Args:
-        content: HTML string to output
+        content: HTML string or any value to output (will be converted to string)
 
     Example:
         html("<h1>Title</h1>")
         html("<div style='color: blue'>Blue text</div>")
+        html(42)  # Numeric values are converted to strings
     """
-    _add_output(content)
+    _add_output(str(content))
 
 
 def text(content: str):

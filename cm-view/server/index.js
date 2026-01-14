@@ -337,16 +337,29 @@ async function copyTemplateToWorkspace(workspaceId, templateName = 'default') {
       try {
         await fs.access(defaultDir);
         await copyDirRecursive(defaultDir, workspaceDir);
-        return;
       } catch {
-        // Default doesn't exist either
+        // Default doesn't exist either - create minimal workspace
+        console.warn('No templates found, creating empty workspace');
+        const initPath = path.join(workspaceDir, '__init__.py');
+        await fs.writeFile(initPath, '# Workspace package - auto-generated\n', 'utf-8');
       }
+    } else {
+      // Default template doesn't exist - create minimal workspace
+      console.warn('No templates found, creating empty workspace');
+      const initPath = path.join(workspaceDir, '__init__.py');
+      await fs.writeFile(initPath, '# Workspace package - auto-generated\n', 'utf-8');
     }
+  }
 
-    // Create minimal workspace with just __init__.py
-    console.warn('No templates found, creating empty workspace');
-    const initPath = path.join(workspaceDir, '__init__.py');
-    await fs.writeFile(initPath, '# Workspace package - auto-generated\n', 'utf-8');
+  // Always copy the library reference README.md to the workspace root
+  const readmePath = path.join(TEMPLATES_DIR, 'README.md');
+  const destReadmePath = path.join(workspaceDir, 'README.md');
+
+  try {
+    await fs.copyFile(readmePath, destReadmePath);
+    console.log(`Copied README.md to workspace ${workspaceId}`);
+  } catch (error) {
+    console.warn(`Failed to copy README.md to workspace ${workspaceId}:`, error.message);
   }
 }
 
@@ -372,28 +385,60 @@ function getWorkspaceDir(workspaceId) {
   return path.join(WORKSPACE_DIR, String(workspaceId));
 }
 
-// Build file tree recursively
-async function buildFileTree(dirPath, basePath = '') {
+// Build file tree with lazy loading support
+// maxDepth: 0 = no recursion (lazy load), 1 = one level, -1 = full recursion
+// limit: max items per directory (for pagination)
+async function buildFileTree(dirPath, basePath = '', options = {}) {
+  const { maxDepth = 0, limit = 1000, offset = 0 } = options;
+
   const entries = await fs.readdir(dirPath, { withFileTypes: true });
   const items = [];
 
-  for (const entry of entries) {
-    // Skip hidden files and node_modules
-    if (entry.name.startsWith('.') || entry.name === 'node_modules') {
-      continue;
-    }
+  // Filter and categorize entries
+  const filtered = entries.filter(entry =>
+    !entry.name.startsWith('.') && entry.name !== 'node_modules'
+  );
 
+  // Sort: folders first, then files, alphabetically
+  const sorted = filtered.sort((a, b) => {
+    if (a.isDirectory() !== b.isDirectory()) {
+      return a.isDirectory() ? -1 : 1;
+    }
+    return a.name.localeCompare(b.name);
+  });
+
+  // Apply pagination
+  const paginated = sorted.slice(offset, offset + limit);
+  const hasMore = sorted.length > offset + limit;
+
+  for (const entry of paginated) {
     const relativePath = basePath ? `${basePath}/${entry.name}` : entry.name;
     const fullPath = path.join(dirPath, entry.name);
 
     if (entry.isDirectory()) {
-      const children = await buildFileTree(fullPath, relativePath);
-      items.push({
+      // Count immediate children for folder
+      let childCount = 0;
+      try {
+        const dirEntries = await fs.readdir(fullPath, { withFileTypes: true });
+        childCount = dirEntries.filter(e =>
+          !e.name.startsWith('.') && e.name !== 'node_modules'
+        ).length;
+      } catch {
+        childCount = 0;
+      }
+
+      const folderItem = {
         name: entry.name,
         path: relativePath,
         type: 'folder',
-        children
-      });
+        childCount,
+        // Only load children if maxDepth allows
+        children: maxDepth > 0
+          ? (await buildFileTree(fullPath, relativePath, { ...options, maxDepth: maxDepth - 1 })).items
+          : null
+      };
+
+      items.push(folderItem);
     } else {
       const stats = await fs.stat(fullPath);
       items.push({
@@ -406,11 +451,13 @@ async function buildFileTree(dirPath, basePath = '') {
     }
   }
 
-  // Sort: folders first, then files, alphabetically
-  return items.sort((a, b) => {
-    if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
-    return a.name.localeCompare(b.name);
-  });
+  return {
+    items,
+    totalCount: sorted.length,
+    hasMore,
+    offset,
+    limit
+  };
 }
 
 // Validate path to prevent directory traversal (workspace-specific)
@@ -429,8 +476,16 @@ function validateWorkspacePath(workspaceId, userPath) {
 app.get('/api/workspaces/:workspaceId/files', async (req, res) => {
   try {
     const workspaceDir = await ensureWorkspaceDir(req.params.workspaceId);
-    const files = await buildFileTree(workspaceDir);
-    res.json({ files });
+
+    // Parse query parameters for lazy loading
+    const options = {
+      maxDepth: parseInt(req.query.depth) || 1,  // Default: load one level
+      limit: parseInt(req.query.limit) || 1000,
+      offset: parseInt(req.query.offset) || 0
+    };
+
+    const result = await buildFileTree(workspaceDir, '', options);
+    res.json(result);
   } catch (error) {
     console.error('Error listing files:', error);
     res.status(500).json({ error: error.message });
@@ -444,8 +499,15 @@ app.get('/api/workspaces/:workspaceId/files/:path(*)', async (req, res) => {
     const stats = await fs.stat(filePath);
 
     if (stats.isDirectory()) {
-      const children = await buildFileTree(filePath, req.params.path);
-      res.json({ type: 'folder', children });
+      // Parse query parameters for lazy loading
+      const options = {
+        maxDepth: parseInt(req.query.depth) || 0,  // Default: no recursion (lazy)
+        limit: parseInt(req.query.limit) || 1000,
+        offset: parseInt(req.query.offset) || 0
+      };
+
+      const result = await buildFileTree(filePath, req.params.path, options);
+      res.json({ type: 'folder', ...result });
     } else {
       const content = await fs.readFile(filePath, 'utf-8');
       res.json({

@@ -30,31 +30,44 @@
       <span class="node-name">{{ item.name }}</span>
     </div>
 
-    <div v-if="item.type === 'folder' && expanded && item.children" class="children">
-      <FileTreeNode
-        v-for="child in item.children"
-        :key="child.path"
-        :item="child"
-        :selected-path="selectedPath"
-        :selected-paths="selectedPaths"
-        @select="(item, event) => $emit('select', item, event)"
-        @open="$emit('open', $event)"
-        @delete="$emit('delete', $event)"
-        @rename="$emit('rename', $event)"
-        @create-file="$emit('create-file', $event)"
-        @create-folder="$emit('create-folder', $event)"
-        @context-menu="$emit('context-menu', $event)"
-        @move="$emit('move', $event)"
-      />
+    <div v-if="item.type === 'folder' && expanded" class="children">
+      <div v-if="loading" class="loading-indicator">Loading...</div>
+      <div v-else-if="loadError" class="error-indicator">{{ loadError }}</div>
+      <template v-else-if="children && children.length > 0">
+        <FileTreeNode
+          v-for="child in children"
+          :key="child.path"
+          :item="child"
+          :workspace-id="workspaceId"
+          :selected-path="selectedPath"
+          :selected-paths="selectedPaths"
+          @select="(item, event) => $emit('select', item, event)"
+          @open="$emit('open', $event)"
+          @delete="$emit('delete', $event)"
+          @rename="$emit('rename', $event)"
+          @create-file="$emit('create-file', $event)"
+          @create-folder="$emit('create-folder', $event)"
+          @context-menu="$emit('context-menu', $event)"
+          @move="$emit('move', $event)"
+        />
+        <div v-if="hasMore" class="load-more">
+          <button @click="loadMore" :disabled="loadingMore">
+            {{ loadingMore ? 'Loading...' : `Load more (${totalCount - children.length} remaining)` }}
+          </button>
+        </div>
+      </template>
+      <div v-else-if="item.childCount === 0" class="empty-folder">Empty folder</div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
+import axios from 'axios'
 
 const props = defineProps({
   item: { type: Object, required: true },
+  workspaceId: { type: [String, Number], required: true },
   selectedPath: { type: String, default: null },
   selectedPaths: { type: Set, default: () => new Set() }
 })
@@ -63,6 +76,60 @@ const emit = defineEmits(['select', 'open', 'delete', 'rename', 'create-file', '
 
 const expanded = ref(false)
 const isDragOver = ref(false)
+const children = ref(props.item.children || null)
+const loading = ref(false)
+const loadError = ref(null)
+const totalCount = ref(0)
+const hasMore = ref(false)
+const loadingMore = ref(false)
+
+// Watch for expansion to lazy-load children
+watch(expanded, async (isExpanded) => {
+  if (isExpanded && props.item.type === 'folder' && !children.value) {
+    await loadChildren()
+  }
+})
+
+async function loadChildren(offset = 0) {
+  if (offset === 0) {
+    loading.value = true
+  } else {
+    loadingMore.value = true
+  }
+
+  loadError.value = null
+
+  try {
+    const url = `/api/workspaces/${props.workspaceId}/files/${encodeURIComponent(props.item.path)}`
+    const response = await axios.get(url, {
+      params: {
+        depth: 0,  // Don't load grandchildren
+        limit: 1000,
+        offset
+      }
+    })
+
+    if (offset === 0) {
+      children.value = response.data.items || []
+    } else {
+      children.value = [...children.value, ...(response.data.items || [])]
+    }
+
+    totalCount.value = response.data.totalCount || 0
+    hasMore.value = response.data.hasMore || false
+  } catch (error) {
+    loadError.value = error.response?.data?.error || error.message
+  } finally {
+    loading.value = false
+    loadingMore.value = false
+  }
+}
+
+function loadMore() {
+  if (children.value) {
+    loadChildren(children.value.length)
+  }
+}
 
 function getIcon(item) {
   if (item.type === 'folder') {
@@ -228,5 +295,41 @@ function handleDrop(event) {
 
 .children {
   padding-left: 1rem;
+}
+
+.loading-indicator, .error-indicator, .empty-folder {
+  padding: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.error-indicator {
+  color: var(--error);
+}
+
+.load-more {
+  padding: 0.5rem;
+}
+
+.load-more button {
+  width: 100%;
+  padding: 0.4rem;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: background 0.2s;
+}
+
+.load-more button:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+}
+
+.load-more button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 </style>

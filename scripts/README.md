@@ -8,10 +8,13 @@ This directory contains automation scripts for the Chemical Machines project.
 
 Automatically generates and updates autocomplete entries for CodeCell.vue based on exports from cm-libraries modules.
 
+**📖 Full Documentation**: See [AUTOCOMPLETE.md](AUTOCOMPLETE.md) for detailed documentation on static and dynamic autocomplete.
+
 ### Features
 
 - **Automatic Discovery**: Scans all Python modules in `cm-libraries/python/cm/` and extracts exported symbols from `__all__`
 - **Smart Categorization**: Automatically categorizes exports into constants, classes, and functions based on naming conventions
+- **Class Method Extraction**: Parses Python source files to extract public methods for each class
 - **Watch Mode**: Monitors `__init__.py` files for changes and automatically regenerates autocomplete
 - **Preserves Existing Entries**: Keeps existing non-CM autocomplete entries (numpy, scipy, etc.) intact
 

@@ -34,6 +34,66 @@ function log(message, color = 'reset') {
 }
 
 /**
+ * Parse Python source file to extract class methods
+ */
+function parseClassMethods(filePath, className) {
+  try {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const methods = [];
+
+    // Find class definition
+    const classRegex = new RegExp(`class\\s+${className}[\\s\\(:]`, 'm');
+    if (!classRegex.test(content)) {
+      return methods;
+    }
+
+    // Extract method definitions (def method_name)
+    // Match methods but exclude private ones (starting with _)
+    const methodRegex = /^\s{4,}def\s+([a-z_][a-z0-9_]*)\s*\(/gm;
+    let match;
+
+    while ((match = methodRegex.exec(content)) !== null) {
+      const methodName = match[1];
+      // Skip private/magic methods
+      if (!methodName.startsWith('_')) {
+        methods.push(methodName);
+      }
+    }
+
+    return [...new Set(methods)]; // Remove duplicates
+  } catch (error) {
+    return [];
+  }
+}
+
+/**
+ * Get methods for a specific class
+ */
+function getClassMethods(moduleName, className, modulePath) {
+  const methods = [];
+
+  // Try common file locations
+  const possibleFiles = [
+    path.join(modulePath, `${className.toLowerCase()}.py`),
+    path.join(modulePath, `${moduleName}.py`),
+    path.join(modulePath, 'core.py'),
+    path.join(modulePath, 'atoms.py'),
+    path.join(modulePath, 'molecules.py'),
+    path.join(modulePath, 'hamiltonian.py'),
+    path.join(modulePath, 'functions.py'),
+  ];
+
+  for (const filePath of possibleFiles) {
+    if (fs.existsSync(filePath)) {
+      const classMethods = parseClassMethods(filePath, className);
+      methods.push(...classMethods);
+    }
+  }
+
+  return [...new Set(methods)]; // Remove duplicates
+}
+
+/**
  * Parse Python __init__.py to extract exported symbols
  */
 function parsePythonInit(initPath) {
@@ -146,7 +206,7 @@ function generatePythonModuleAutocomplete(moduleName, modulePath) {
     });
   }
 
-  // Add classes
+  // Add classes with their methods
   if (exports.classes.length > 0) {
     entries.push(`// CM ${moduleName} - classes`);
     exports.classes.forEach(name => {
@@ -155,6 +215,18 @@ function generatePythonModuleAutocomplete(moduleName, modulePath) {
         type: 'class',
         detail: `cm.${moduleName}: ${name}`
       });
+
+      // Add class methods (for autocomplete like: atom_instance.method)
+      const methods = getClassMethods(moduleName, name, modulePath);
+      if (methods.length > 0) {
+        methods.forEach(method => {
+          entries.push({
+            label: `${name}.${method}`,
+            type: 'method',
+            detail: `${name} method: ${method}()`
+          });
+        });
+      }
     });
   }
 

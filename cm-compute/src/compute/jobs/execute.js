@@ -3,11 +3,13 @@
  *
  * Executes arbitrary Python code (for notebook cells)
  * Supports workspace-relative imports via `from workspace import module`
+ * Maintains persistent Python kernels for Jupyter-like behavior
  */
 
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const { getKernel, stopKernel, resetKernel, interruptKernel, isKernelBusy } = require('./python-kernel');
 
 // Workspace directory (matches cm-view configuration)
 const WORKSPACE_DIR = process.env.WORKSPACE_DIR || path.join(__dirname, '../../../../workspace');
@@ -28,28 +30,89 @@ function ensureWorkspacePackage() {
 
 /**
  * Execute Python code directly
- * @param {Object} params - Job parameters { code, environment, sourceDir, cellInfo }
+ * @param {Object} params - Job parameters { code, environment, sourceDir, cellInfo, usePersistentKernel, kernelAction, timeout }
  * @param {Object} context - Execution context { pythonPath, jobId, emit }
  * @returns {Promise<Object>} Execution results
  */
 async function execute(params, context) {
-  const { pythonPath, jobId, emit } = context;
-  const { code, sourceDir = '', cellInfo } = params;
+  const { pythonPath, emit } = context;
+  const { code, sourceDir = '', cellInfo, usePersistentKernel = true, kernelAction, timeout } = params;
 
-  if (!code) {
+  if (!code && !kernelAction) {
     throw new Error('No code provided');
   }
 
   // Ensure workspace can be imported as a package
   ensureWorkspacePackage();
 
+  const sourceFullDir = sourceDir ? path.join(WORKSPACE_DIR, sourceDir) : WORKSPACE_DIR;
+
+  // Generate kernel ID based on file path (one kernel per file)
+  // This ensures all cells in the same file share the same context
+  const kernelId = cellInfo && cellInfo.filePath
+    ? `${sourceFullDir}:${cellInfo.filePath}`
+    : `${sourceFullDir}:default`;
+
+  // Handle kernel management actions
+  if (kernelAction) {
+    switch (kernelAction) {
+      case 'stop':
+        stopKernel(kernelId);
+        return { output: 'Kernel stopped', stderr: undefined };
+      case 'reset':
+        await resetKernel(kernelId);
+        return { output: 'Kernel reset', stderr: undefined };
+      case 'interrupt':
+        const wasInterrupted = interruptKernel(kernelId);
+        return {
+          output: wasInterrupted ? 'Kernel interrupted' : 'Kernel not executing or not found',
+          interrupted: wasInterrupted,
+          stderr: undefined
+        };
+      case 'status':
+        const isBusy = isKernelBusy(kernelId);
+        return {
+          output: isBusy ? 'Kernel is executing' : 'Kernel is idle',
+          busy: isBusy,
+          stderr: undefined
+        };
+      default:
+        throw new Error(`Unknown kernel action: ${kernelAction}`);
+    }
+  }
+
+  // Use persistent kernel for cell files by default
+  if (usePersistentKernel && cellInfo && cellInfo.isCellFile) {
+    const kernel = getKernel(kernelId, pythonPath, WORKSPACE_DIR, sourceFullDir, cellInfo);
+    const cellIndex = cellInfo.cellIndex;
+
+    try {
+      const result = await kernel.execute(code, cellIndex, emit, timeout);
+
+      // Try to parse as JSON first
+      try {
+        const jsonResult = JSON.parse(result.output.trim());
+        return { ...jsonResult, interrupted: result.interrupted, timedOut: result.timedOut };
+      } catch (e) {
+        // Return raw output
+        return result;
+      }
+    } catch (error) {
+      return {
+        error: error.message,
+        output: '',
+        stderr: error.message
+      };
+    }
+  }
+
+  // Fallback to non-persistent execution for non-cell files or when explicitly disabled
   // Build PYTHONPATH to include:
   // 1. Parent of workspace (so `import workspace` works)
   // 2. The workspace itself (so `import module` works for files in workspace root)
   // 3. The source file's directory (so relative imports work)
   // 4. cm-libraries for cm_output module
   const workspaceParent = path.dirname(WORKSPACE_DIR);
-  const sourceFullDir = sourceDir ? path.join(WORKSPACE_DIR, sourceDir) : WORKSPACE_DIR;
   const cmLibrariesPath = path.join(__dirname, '../../../../cm-libraries/python');
 
   const pythonPathParts = [

@@ -355,6 +355,9 @@
             @update="updateCell(index, $event)"
             @run="executeCell(index)"
             @delete="deleteCell(index)"
+            @create-below="createCellBelow(index)"
+            @reorder="reorderCells"
+            @interrupt="interruptCell(index)"
           />
         </div>
         <div class="no-file-message" v-else-if="!currentFile">
@@ -1401,6 +1404,40 @@ function deleteCell(index) {
   hasUnsavedChanges.value = true
 }
 
+function createCellBelow(index) {
+  // Inherit language and environment from the cell above
+  const cellAbove = cells.value[index]
+  const language = cellAbove?.language || currentFile.value?.language || 'python'
+  const environment = cellAbove?.environment || selectedEnvironment.value
+
+  const newCell = {
+    id: Date.now(),
+    type: 'code',
+    language,
+    environment,
+    content: '',
+    title: '',
+    output: null,
+    status: null
+  }
+
+  // Insert the new cell right after the current one
+  cells.value.splice(index + 1, 0, newCell)
+  hasUnsavedChanges.value = true
+}
+
+function reorderCells({ fromIndex, toIndex }) {
+  if (fromIndex === toIndex) return
+
+  // Remove the cell from its current position
+  const [movedCell] = cells.value.splice(fromIndex, 1)
+
+  // Insert it at the new position
+  cells.value.splice(toIndex, 0, movedCell)
+
+  hasUnsavedChanges.value = true
+}
+
 async function executeCell(index) {
   const cell = cells.value[index]
   cell.status = 'running'
@@ -1553,6 +1590,51 @@ async function executeCell(index) {
   } catch (error) {
     cell.output = `Error: ${error.message}`
     cell.status = 'error'
+  }
+}
+
+async function interruptCell(index) {
+  const cell = cells.value[index]
+
+  if (cell.status !== 'running') {
+    return
+  }
+
+  try {
+    // Build sourceDir same as in executeCell
+    const fileDir = currentFile.value?.path
+      ? currentFile.value.path.includes('/')
+        ? currentFile.value.path.substring(0, currentFile.value.path.lastIndexOf('/'))
+        : ''
+      : ''
+    const sourceDir = workspaceId.value
+      ? (fileDir ? `${workspaceId.value}/${fileDir}` : String(workspaceId.value))
+      : fileDir
+
+    // Cell info to identify the kernel
+    const cellInfo = {
+      filePath: currentFile.value?.path || '',
+      cellIndex: index,
+      isCellFile: currentUseCells.value
+    }
+
+    // Send interrupt action to the backend
+    const response = await axios.post('/api/compute', {
+      type: 'execute',
+      params: {
+        kernelAction: 'interrupt',
+        sourceDir,
+        cellInfo
+      }
+    })
+
+    if (response.data.interrupted) {
+      cell.output = (cell.output || '') + '\n\n[Execution interrupted by user]'
+      cell.status = 'error'
+    }
+  } catch (error) {
+    console.error('Failed to interrupt cell:', error)
+    cell.output = (cell.output || '') + `\n\nFailed to interrupt: ${error.message}`
   }
 }
 

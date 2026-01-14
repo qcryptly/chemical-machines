@@ -1,11 +1,38 @@
 <template>
-  <div class="cell" :class="{ focused: isFocused }">
+  <div
+    class="cell"
+    :class="{ focused: isFocused, 'drag-over': isDragOver, 'dragging': isDragging }"
+    @dragover="handleDragOver"
+    @dragleave="handleDragLeave"
+    @drop="handleDrop"
+  >
     <div class="cell-toolbar">
+      <span
+        class="drag-handle"
+        title="Drag to reorder"
+        draggable="true"
+        @dragstart="handleDragStart"
+        @dragend="handleDragEnd"
+      >⋮⋮</span>
       <span class="cell-number">[{{ index + 1 }}]</span>
       <div class="toolbar-spacer"></div>
-      <button @click="$emit('run')" class="run-btn" title="Run cell (Ctrl+Enter)">
-        <span v-if="cell.status === 'running'" class="spinner"></span>
-        <span v-else>&#9654;</span>
+      <button @click="$emit('create-below')" class="create-below-btn" title="Create cell below (Alt+Enter)">
+        <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
+          <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+        </svg>
+      </button>
+      <button
+        v-if="cell.status === 'running'"
+        @click="$emit('interrupt')"
+        class="interrupt-btn"
+        title="Interrupt execution (Ctrl+C)"
+      >
+        <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
+          <path d="M6 6h12v12H6z"/>
+        </svg>
+      </button>
+      <button @click="$emit('run')" class="run-btn" title="Run cell (Ctrl+Enter)" v-else>
+        <span>&#9654;</span>
       </button>
       <button @click="$emit('delete')" class="delete-btn" title="Delete cell">&times;</button>
     </div>
@@ -35,9 +62,9 @@ import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from '@codemirror/view'
 import OutputPanel from './OutputPanel.vue'
 import { EditorState } from '@codemirror/state'
-import { defaultKeymap, history, historyKeymap, indentWithTab, insertNewlineAndIndent } from '@codemirror/commands'
+import { defaultKeymap, history, historyKeymap, insertNewlineAndIndent, indentMore } from '@codemirror/commands'
 import { syntaxHighlighting, HighlightStyle, bracketMatching, foldGutter } from '@codemirror/language'
-import { autocompletion, completionKeymap, completeFromList } from '@codemirror/autocomplete'
+import { autocompletion, completeFromList, acceptCompletion, startCompletion } from '@codemirror/autocomplete'
 import { cpp } from '@codemirror/lang-cpp'
 import { StreamLanguage } from '@codemirror/language'
 import { shell } from '@codemirror/legacy-modes/mode/shell'
@@ -46,255 +73,288 @@ import { tags } from '@lezer/highlight'
 
 // Python completions - common builtins, keywords, and scientific computing
 const pythonCompletions = [
-  // Keywords
-  { label: 'import', type: 'keyword', detail: 'import module' },
-  { label: 'from', type: 'keyword', detail: 'from module import' },
-  { label: 'def', type: 'keyword', detail: 'define function' },
-  { label: 'class', type: 'keyword', detail: 'define class' },
-  { label: 'return', type: 'keyword' },
-  { label: 'yield', type: 'keyword' },
-  { label: 'if', type: 'keyword' },
-  { label: 'elif', type: 'keyword' },
-  { label: 'else', type: 'keyword' },
-  { label: 'for', type: 'keyword' },
-  { label: 'while', type: 'keyword' },
-  { label: 'try', type: 'keyword' },
-  { label: 'except', type: 'keyword' },
-  { label: 'finally', type: 'keyword' },
-  { label: 'with', type: 'keyword' },
-  { label: 'as', type: 'keyword' },
-  { label: 'lambda', type: 'keyword' },
-  { label: 'pass', type: 'keyword' },
-  { label: 'break', type: 'keyword' },
-  { label: 'continue', type: 'keyword' },
-  { label: 'raise', type: 'keyword' },
-  { label: 'assert', type: 'keyword' },
-  { label: 'async', type: 'keyword' },
-  { label: 'await', type: 'keyword' },
-  { label: 'global', type: 'keyword' },
-  { label: 'nonlocal', type: 'keyword' },
-  // Builtins
-  { label: 'print', type: 'function', detail: 'print(*args)' },
-  { label: 'len', type: 'function', detail: 'len(obj)' },
-  { label: 'range', type: 'function', detail: 'range(start, stop, step)' },
-  { label: 'list', type: 'function', detail: 'list(iterable)' },
-  { label: 'dict', type: 'function', detail: 'dict(**kwargs)' },
-  { label: 'set', type: 'function', detail: 'set(iterable)' },
-  { label: 'tuple', type: 'function', detail: 'tuple(iterable)' },
-  { label: 'str', type: 'function', detail: 'str(obj)' },
-  { label: 'int', type: 'function', detail: 'int(x)' },
-  { label: 'float', type: 'function', detail: 'float(x)' },
-  { label: 'bool', type: 'function', detail: 'bool(x)' },
-  { label: 'type', type: 'function', detail: 'type(obj)' },
-  { label: 'isinstance', type: 'function', detail: 'isinstance(obj, class)' },
-  { label: 'hasattr', type: 'function', detail: 'hasattr(obj, name)' },
-  { label: 'getattr', type: 'function', detail: 'getattr(obj, name, default)' },
-  { label: 'setattr', type: 'function', detail: 'setattr(obj, name, value)' },
-  { label: 'enumerate', type: 'function', detail: 'enumerate(iterable)' },
-  { label: 'zip', type: 'function', detail: 'zip(*iterables)' },
-  { label: 'map', type: 'function', detail: 'map(func, iterable)' },
-  { label: 'filter', type: 'function', detail: 'filter(func, iterable)' },
-  { label: 'sorted', type: 'function', detail: 'sorted(iterable, key=None)' },
-  { label: 'reversed', type: 'function', detail: 'reversed(seq)' },
-  { label: 'sum', type: 'function', detail: 'sum(iterable)' },
-  { label: 'min', type: 'function', detail: 'min(iterable)' },
-  { label: 'max', type: 'function', detail: 'max(iterable)' },
-  { label: 'abs', type: 'function', detail: 'abs(x)' },
-  { label: 'round', type: 'function', detail: 'round(x, ndigits)' },
-  { label: 'open', type: 'function', detail: 'open(file, mode)' },
-  { label: 'input', type: 'function', detail: 'input(prompt)' },
-  { label: 'format', type: 'function', detail: 'format(value, spec)' },
-  { label: 'repr', type: 'function', detail: 'repr(obj)' },
-  { label: 'ord', type: 'function', detail: 'ord(char)' },
-  { label: 'chr', type: 'function', detail: 'chr(code)' },
-  { label: 'hex', type: 'function', detail: 'hex(x)' },
-  { label: 'bin', type: 'function', detail: 'bin(x)' },
-  { label: 'all', type: 'function', detail: 'all(iterable)' },
-  { label: 'any', type: 'function', detail: 'any(iterable)' },
-  { label: 'callable', type: 'function', detail: 'callable(obj)' },
-  { label: 'dir', type: 'function', detail: 'dir(obj)' },
-  { label: 'vars', type: 'function', detail: 'vars(obj)' },
-  { label: 'help', type: 'function', detail: 'help(obj)' },
-  { label: 'exec', type: 'function', detail: 'exec(code)' },
-  { label: 'eval', type: 'function', detail: 'eval(expr)' },
-  // Constants
-  { label: 'True', type: 'constant' },
-  { label: 'False', type: 'constant' },
-  { label: 'None', type: 'constant' },
-  // Common imports
-  { label: 'numpy', type: 'module', detail: 'numerical computing (as np)' },
-  { label: 'pandas', type: 'module', detail: 'data analysis (as pd)' },
-  { label: 'matplotlib', type: 'module', detail: 'plotting (.pyplot as plt)' },
-  { label: 'scipy', type: 'module', detail: 'scientific computing' },
-  { label: 'torch', type: 'module', detail: 'PyTorch' },
-  { label: 'tensorflow', type: 'module', detail: 'TensorFlow (as tf)' },
-  { label: 'sklearn', type: 'module', detail: 'scikit-learn' },
-  { label: 'rdkit', type: 'module', detail: 'chemistry toolkit' },
-  { label: 'openmm', type: 'module', detail: 'molecular dynamics' },
-  { label: 'mdtraj', type: 'module', detail: 'MD trajectory analysis (as md)' },
-  { label: 'Bio', type: 'module', detail: 'Biopython' },
-  // NumPy shortcuts
-  { label: 'np.array', type: 'function', detail: 'create array' },
-  { label: 'np.zeros', type: 'function', detail: 'array of zeros' },
-  { label: 'np.ones', type: 'function', detail: 'array of ones' },
-  { label: 'np.arange', type: 'function', detail: 'evenly spaced values' },
-  { label: 'np.linspace', type: 'function', detail: 'linearly spaced values' },
-  { label: 'np.reshape', type: 'function', detail: 'reshape array' },
-  { label: 'np.mean', type: 'function', detail: 'mean value' },
-  { label: 'np.std', type: 'function', detail: 'standard deviation' },
-  { label: 'np.sum', type: 'function', detail: 'sum of elements' },
-  { label: 'np.dot', type: 'function', detail: 'dot product' },
-  { label: 'np.random', type: 'namespace', detail: 'random number generation' },
-  { label: 'np.linalg', type: 'namespace', detail: 'linear algebra' },
-  // CM library - views module
-  { label: 'cm.views', type: 'module', detail: 'CM visualization module' },
-  { label: 'from cm.views import', type: 'text', detail: 'import CM views' },
-  { label: 'html', type: 'function', detail: 'cm.views: render HTML' },
-  { label: 'text', type: 'function', detail: 'cm.views: render text' },
-  { label: 'log', type: 'function', detail: 'cm.views: log message' },
-  { label: 'table', type: 'function', detail: 'cm.views: render table' },
-  { label: 'image', type: 'function', detail: 'cm.views: display image' },
-  { label: 'savefig', type: 'function', detail: 'cm.views: save matplotlib figure' },
-  { label: 'dataframe', type: 'function', detail: 'cm.views: render pandas DataFrame' },
-  { label: 'scatter_3d', type: 'function', detail: 'cm.views: 3D scatter plot' },
-  { label: 'line_3d', type: 'function', detail: 'cm.views: 3D line plot' },
-  { label: 'lines_3d', type: 'function', detail: 'cm.views: multiple 3D lines' },
-  { label: 'surface', type: 'function', detail: 'cm.views: 3D surface plot' },
-  { label: 'vector_field', type: 'function', detail: 'cm.views: 3D vector field' },
-  { label: 'molecule', type: 'function', detail: 'cm.views: molecule visualization' },
-  { label: 'molecule_xyz', type: 'function', detail: 'cm.views: molecule from XYZ' },
-  { label: 'crystal', type: 'function', detail: 'cm.views: crystal structure' },
-  { label: 'webgl', type: 'function', detail: 'cm.views: raw WebGL HTML' },
-  { label: 'webgl_threejs', type: 'function', detail: 'cm.views: Three.js helper' },
-  { label: 'clear', type: 'function', detail: 'cm.views: clear cell output' },
-  { label: 'clear_all', type: 'function', detail: 'cm.views: clear all output' },
-  // CM library - symbols module
-  { label: 'cm.symbols', type: 'module', detail: 'CM LaTeX math module' },
-  { label: 'from cm.symbols import', type: 'text', detail: 'import CM symbols' },
-  { label: 'latex', type: 'function', detail: 'cm.symbols: render LaTeX' },
-  { label: 'equation', type: 'function', detail: 'cm.symbols: numbered equation' },
-  { label: 'align', type: 'function', detail: 'cm.symbols: aligned equations' },
-  { label: 'matrix', type: 'function', detail: 'cm.symbols: render matrix' },
-  { label: 'Math', type: 'class', detail: 'cm.symbols: symbolic math class' },
-  { label: 'set_notation', type: 'function', detail: 'cm.symbols: set notation style' },
-  { label: 'set_line_height', type: 'function', detail: 'cm.symbols: set line spacing' },
-  // CM symbols - hyperparameter types
-  { label: 'Scalar', type: 'class', detail: 'cm.symbols: scalar hyperparameter type' },
-  { label: 'ExprType', type: 'class', detail: 'cm.symbols: expression hyperparameter type' },
-  { label: 'BoundsType', type: 'class', detail: 'cm.symbols: bounds hyperparameter type' },
-  // CM symbols - expression classes
-  { label: 'Expr', type: 'class', detail: 'cm.symbols: base expression class' },
-  { label: 'Var', type: 'class', detail: 'cm.symbols: variable expression' },
-  { label: 'Const', type: 'class', detail: 'cm.symbols: constant expression' },
-  { label: 'Sum', type: 'class', detail: 'cm.symbols: summation expression' },
-  { label: 'Product', type: 'class', detail: 'cm.symbols: product expression' },
-  // CM symbols - function composition
-  { label: 'SymbolicFunction', type: 'class', detail: 'cm.symbols: reusable function' },
-  { label: 'BoundFunction', type: 'class', detail: 'cm.symbols: function with bound params' },
-  { label: 'ComputeGraph', type: 'class', detail: 'cm.symbols: lazy evaluation graph' },
-  { label: 'TorchFunction', type: 'class', detail: 'cm.symbols: PyTorch compiled function' },
-  { label: 'TorchGradFunction', type: 'class', detail: 'cm.symbols: PyTorch gradient function' },
-  // CM symbols - special function classes
-  { label: 'SpecialFunction', type: 'class', detail: 'cm.symbols: base special function' },
-  { label: 'Gamma', type: 'class', detail: 'cm.symbols: gamma function Γ(z)' },
-  { label: 'Beta', type: 'class', detail: 'cm.symbols: beta function B(a,b)' },
-  { label: 'Factorial', type: 'class', detail: 'cm.symbols: factorial n!' },
-  { label: 'Binomial', type: 'class', detail: 'cm.symbols: binomial C(n,k)' },
-  { label: 'Erf', type: 'class', detail: 'cm.symbols: error function' },
-  { label: 'BesselJ', type: 'class', detail: 'cm.symbols: Bessel J_ν(z)' },
-  { label: 'BesselY', type: 'class', detail: 'cm.symbols: Bessel Y_ν(z)' },
-  { label: 'Legendre', type: 'class', detail: 'cm.symbols: Legendre P_n(x)' },
-  { label: 'AssocLegendre', type: 'class', detail: 'cm.symbols: Associated Legendre' },
-  { label: 'Hermite', type: 'class', detail: 'cm.symbols: Hermite H_n(x)' },
-  { label: 'Laguerre', type: 'class', detail: 'cm.symbols: Laguerre L_n(x)' },
-  { label: 'AssocLaguerre', type: 'class', detail: 'cm.symbols: Associated Laguerre' },
-  { label: 'SphericalHarmonic', type: 'class', detail: 'cm.symbols: Y_l^m(θ,φ)' },
-  { label: 'AiryAi', type: 'class', detail: 'cm.symbols: Airy Ai(z)' },
-  { label: 'AiryBi', type: 'class', detail: 'cm.symbols: Airy Bi(z)' },
-  // CM library - qm module
-  { label: 'cm.qm', type: 'module', detail: 'CM quantum mechanics module' },
+// Keywords
+{ label: 'import', type: 'keyword', detail: 'import module' },
+{ label: 'from', type: 'keyword', detail: 'from module import' },
+{ label: 'def', type: 'keyword', detail: 'define function' },
+{ label: 'class', type: 'keyword', detail: 'define class' },
+{ label: 'return', type: 'keyword' },
+{ label: 'yield', type: 'keyword' },
+{ label: 'if', type: 'keyword' },
+{ label: 'elif', type: 'keyword' },
+{ label: 'else', type: 'keyword' },
+{ label: 'for', type: 'keyword' },
+{ label: 'while', type: 'keyword' },
+{ label: 'try', type: 'keyword' },
+{ label: 'except', type: 'keyword' },
+{ label: 'finally', type: 'keyword' },
+{ label: 'with', type: 'keyword' },
+{ label: 'as', type: 'keyword' },
+{ label: 'lambda', type: 'keyword' },
+{ label: 'pass', type: 'keyword' },
+{ label: 'break', type: 'keyword' },
+{ label: 'continue', type: 'keyword' },
+{ label: 'raise', type: 'keyword' },
+{ label: 'assert', type: 'keyword' },
+{ label: 'async', type: 'keyword' },
+{ label: 'await', type: 'keyword' },
+{ label: 'global', type: 'keyword' },
+{ label: 'nonlocal', type: 'keyword' },
+// Builtins
+{ label: 'print', type: 'function', detail: 'print(*args)' },
+{ label: 'len', type: 'function', detail: 'len(obj)' },
+{ label: 'range', type: 'function', detail: 'range(start, stop, step)' },
+{ label: 'list', type: 'function', detail: 'list(iterable)' },
+{ label: 'dict', type: 'function', detail: 'dict(**kwargs)' },
+{ label: 'set', type: 'function', detail: 'set(iterable)' },
+{ label: 'tuple', type: 'function', detail: 'tuple(iterable)' },
+{ label: 'str', type: 'function', detail: 'str(obj)' },
+{ label: 'int', type: 'function', detail: 'int(x)' },
+{ label: 'float', type: 'function', detail: 'float(x)' },
+{ label: 'bool', type: 'function', detail: 'bool(x)' },
+{ label: 'type', type: 'function', detail: 'type(obj)' },
+{ label: 'isinstance', type: 'function', detail: 'isinstance(obj, class)' },
+{ label: 'hasattr', type: 'function', detail: 'hasattr(obj, name)' },
+{ label: 'getattr', type: 'function', detail: 'getattr(obj, name, default)' },
+{ label: 'setattr', type: 'function', detail: 'setattr(obj, name, value)' },
+{ label: 'enumerate', type: 'function', detail: 'enumerate(iterable)' },
+{ label: 'zip', type: 'function', detail: 'zip(*iterables)' },
+{ label: 'map', type: 'function', detail: 'map(func, iterable)' },
+{ label: 'filter', type: 'function', detail: 'filter(func, iterable)' },
+{ label: 'sorted', type: 'function', detail: 'sorted(iterable, key=None)' },
+{ label: 'reversed', type: 'function', detail: 'reversed(seq)' },
+{ label: 'sum', type: 'function', detail: 'sum(iterable)' },
+{ label: 'min', type: 'function', detail: 'min(iterable)' },
+{ label: 'max', type: 'function', detail: 'max(iterable)' },
+{ label: 'abs', type: 'function', detail: 'abs(x)' },
+{ label: 'round', type: 'function', detail: 'round(x, ndigits)' },
+{ label: 'open', type: 'function', detail: 'open(file, mode)' },
+{ label: 'input', type: 'function', detail: 'input(prompt)' },
+{ label: 'format', type: 'function', detail: 'format(value, spec)' },
+{ label: 'repr', type: 'function', detail: 'repr(obj)' },
+{ label: 'ord', type: 'function', detail: 'ord(char)' },
+{ label: 'chr', type: 'function', detail: 'chr(code)' },
+{ label: 'hex', type: 'function', detail: 'hex(x)' },
+{ label: 'bin', type: 'function', detail: 'bin(x)' },
+{ label: 'all', type: 'function', detail: 'all(iterable)' },
+{ label: 'any', type: 'function', detail: 'any(iterable)' },
+{ label: 'callable', type: 'function', detail: 'callable(obj)' },
+{ label: 'dir', type: 'function', detail: 'dir(obj)' },
+{ label: 'vars', type: 'function', detail: 'vars(obj)' },
+{ label: 'help', type: 'function', detail: 'help(obj)' },
+{ label: 'exec', type: 'function', detail: 'exec(code)' },
+{ label: 'eval', type: 'function', detail: 'eval(expr)' },
+// Constants
+{ label: 'True', type: 'constant' },
+{ label: 'False', type: 'constant' },
+{ label: 'None', type: 'constant' },
+// Common imports
+{ label: 'numpy', type: 'module', detail: 'numerical computing (as np)' },
+{ label: 'pandas', type: 'module', detail: 'data analysis (as pd)' },
+{ label: 'matplotlib', type: 'module', detail: 'plotting (.pyplot as plt)' },
+{ label: 'scipy', type: 'module', detail: 'scientific computing' },
+{ label: 'torch', type: 'module', detail: 'PyTorch' },
+{ label: 'tensorflow', type: 'module', detail: 'TensorFlow (as tf)' },
+{ label: 'sklearn', type: 'module', detail: 'scikit-learn' },
+{ label: 'rdkit', type: 'module', detail: 'chemistry toolkit' },
+{ label: 'openmm', type: 'module', detail: 'molecular dynamics' },
+{ label: 'mdtraj', type: 'module', detail: 'MD trajectory analysis (as md)' },
+{ label: 'Bio', type: 'module', detail: 'Biopython' },
+// NumPy shortcuts
+{ label: 'np.array', type: 'function', detail: 'create array' },
+{ label: 'np.zeros', type: 'function', detail: 'array of zeros' },
+{ label: 'np.ones', type: 'function', detail: 'array of ones' },
+{ label: 'np.arange', type: 'function', detail: 'evenly spaced values' },
+{ label: 'np.linspace', type: 'function', detail: 'linearly spaced values' },
+{ label: 'np.reshape', type: 'function', detail: 'reshape array' },
+{ label: 'np.mean', type: 'function', detail: 'mean value' },
+{ label: 'np.std', type: 'function', detail: 'standard deviation' },
+{ label: 'np.sum', type: 'function', detail: 'sum of elements' },
+{ label: 'np.dot', type: 'function', detail: 'dot product' },
+{ label: 'np.random', type: 'namespace', detail: 'random number generation' },
+{ label: 'np.linalg', type: 'namespace', detail: 'linear algebra' },
+  // CM library - auto-generated
+  { label: 'cm.data', type: 'module', detail: 'Chemical Machines Data Package' },
+  { label: 'from cm.data import', type: 'text', detail: 'import CM data' },
+  // CM data - classes
+  { label: 'BenchmarkMolecule', type: 'class', detail: 'cm.data: BenchmarkMolecule' },
+  { label: 'BenchmarkProperty', type: 'class', detail: 'cm.data: BenchmarkProperty' },
+  { label: 'ComparisonResult', type: 'class', detail: 'cm.data: ComparisonResult' },
+  { label: 'PropertyComparison', type: 'class', detail: 'cm.data: PropertyComparison' },
+  { label: 'MoleculeStatus', type: 'class', detail: 'cm.data: MoleculeStatus' },
+  { label: 'BenchmarkError', type: 'class', detail: 'cm.data: BenchmarkError' },
+  { label: 'ServiceUnavailableError', type: 'class', detail: 'cm.data: ServiceUnavailableError' },
+  { label: 'APIError', type: 'class', detail: 'cm.data: APIError' },
+  { label: 'JobError', type: 'class', detail: 'cm.data: JobError' },
+  { label: 'IndexingInProgressError', type: 'class', detail: 'cm.data: IndexingInProgressError' },
+  { label: 'MoleculeNotFoundError', type: 'class', detail: 'cm.data: MoleculeNotFoundError' },
+  { label: 'NoIndexError', type: 'class', detail: 'cm.data: NoIndexError' },
+  // CM data - functions
+  { label: 'search', type: 'function', detail: 'cm.data: search' },
+  { label: 'get', type: 'function', detail: 'cm.data: get' },
+  { label: 'compare', type: 'function', detail: 'cm.data: compare' },
+  { label: 'sync', type: 'function', detail: 'cm.data: sync' },
+  { label: 'stats', type: 'function', detail: 'cm.data: stats' },
+  { label: 'status', type: 'function', detail: 'cm.data: status' },
+  { label: 'cm.qm', type: 'module', detail: 'Chemical Machines Quantum Mechanics Package' },
   { label: 'from cm.qm import', type: 'text', detail: 'import CM qm' },
-  { label: 'SpinOrbital', type: 'class', detail: 'cm.qm: spin-orbital basis element' },
-  { label: 'SlaterDeterminant', type: 'class', detail: 'cm.qm: Slater determinant' },
-  { label: 'DiracSpinor', type: 'class', detail: 'cm.qm: relativistic spinor' },
-  { label: 'basis_sh', type: 'function', detail: 'cm.qm: create spin-orbital basis' },
-  { label: 'basis_sh_element', type: 'function', detail: 'cm.qm: create single spin-orbital' },
-  { label: 'slater', type: 'function', detail: 'cm.qm: create Slater determinant' },
-  { label: 'hamiltonian', type: 'function', detail: 'cm.qm: create Hamiltonian operator' },
-  { label: 'dirac_spinor', type: 'function', detail: 'cm.qm: create Dirac spinor' },
-  { label: 'dirac_slater', type: 'function', detail: 'cm.qm: create Dirac Slater det' },
-  // Math static methods - core
-  { label: 'Math.var', type: 'function', detail: 'create symbolic variable' },
-  { label: 'Math.const', type: 'function', detail: 'create symbolic constant' },
-  { label: 'Math.sum', type: 'function', detail: 'summation Σ' },
-  { label: 'Math.prod', type: 'function', detail: 'product Π' },
-  { label: 'Math.sin', type: 'function', detail: 'sine' },
-  { label: 'Math.cos', type: 'function', detail: 'cosine' },
-  { label: 'Math.tan', type: 'function', detail: 'tangent' },
-  { label: 'Math.exp', type: 'function', detail: 'exponential' },
-  { label: 'Math.log', type: 'function', detail: 'natural logarithm' },
-  { label: 'Math.sqrt', type: 'function', detail: 'square root' },
-  { label: 'Math.abs', type: 'function', detail: 'absolute value' },
-  // Math static methods - special functions (gamma family)
-  { label: 'Math.gamma', type: 'function', detail: 'gamma Γ(z)' },
-  { label: 'Math.loggamma', type: 'function', detail: 'log gamma ln Γ(z)' },
-  { label: 'Math.digamma', type: 'function', detail: 'digamma ψ(z)' },
-  { label: 'Math.beta', type: 'function', detail: 'beta B(a,b)' },
-  { label: 'Math.factorial', type: 'function', detail: 'factorial n!' },
-  { label: 'Math.factorial2', type: 'function', detail: 'double factorial n!!' },
-  { label: 'Math.binomial', type: 'function', detail: 'binomial C(n,k)' },
-  // Math static methods - special functions (error)
-  { label: 'Math.erf', type: 'function', detail: 'error function' },
-  { label: 'Math.erfc', type: 'function', detail: 'complementary error' },
-  { label: 'Math.erfi', type: 'function', detail: 'imaginary error' },
-  // Math static methods - special functions (Bessel)
-  { label: 'Math.besselj', type: 'function', detail: 'Bessel J_ν(z)' },
-  { label: 'Math.bessely', type: 'function', detail: 'Bessel Y_ν(z)' },
-  { label: 'Math.besseli', type: 'function', detail: 'modified Bessel I_ν(z)' },
-  { label: 'Math.besselk', type: 'function', detail: 'modified Bessel K_ν(z)' },
-  { label: 'Math.jn', type: 'function', detail: 'spherical Bessel j_n(z)' },
-  { label: 'Math.yn', type: 'function', detail: 'spherical Bessel y_n(z)' },
-  { label: 'Math.hankel1', type: 'function', detail: 'Hankel H_ν^(1)(z)' },
-  { label: 'Math.hankel2', type: 'function', detail: 'Hankel H_ν^(2)(z)' },
-  // Math static methods - special functions (Airy)
-  { label: 'Math.airyai', type: 'function', detail: 'Airy Ai(z)' },
-  { label: 'Math.airybi', type: 'function', detail: 'Airy Bi(z)' },
-  { label: 'Math.airyaiprime', type: 'function', detail: "Airy Ai'(z)" },
-  { label: 'Math.airybiprime', type: 'function', detail: "Airy Bi'(z)" },
-  // Math static methods - special functions (polynomials)
-  { label: 'Math.legendre', type: 'function', detail: 'Legendre P_n(x)' },
-  { label: 'Math.assoc_legendre', type: 'function', detail: 'Associated Legendre P_n^m(x)' },
-  { label: 'Math.hermite', type: 'function', detail: 'Hermite H_n(x)' },
-  { label: 'Math.hermite_prob', type: 'function', detail: 'probabilist Hermite He_n(x)' },
-  { label: 'Math.laguerre', type: 'function', detail: 'Laguerre L_n(x)' },
-  { label: 'Math.assoc_laguerre', type: 'function', detail: 'Associated Laguerre L_n^α(x)' },
-  { label: 'Math.chebyshevt', type: 'function', detail: 'Chebyshev T_n(x)' },
-  { label: 'Math.chebyshevu', type: 'function', detail: 'Chebyshev U_n(x)' },
-  { label: 'Math.gegenbauer', type: 'function', detail: 'Gegenbauer C_n^α(x)' },
-  { label: 'Math.jacobi', type: 'function', detail: 'Jacobi P_n^(α,β)(x)' },
-  // Math static methods - special functions (spherical)
-  { label: 'Math.Ylm', type: 'function', detail: 'spherical harmonic Y_l^m(θ,φ)' },
-  { label: 'Math.Ylm_real', type: 'function', detail: 'real spherical harmonic' },
-  // Math static methods - special functions (hypergeometric)
-  { label: 'Math.hyper2f1', type: 'function', detail: 'hypergeometric ₂F₁' },
-  { label: 'Math.hyper1f1', type: 'function', detail: 'confluent ₁F₁' },
-  { label: 'Math.hyper0f1', type: 'function', detail: 'confluent ₀F₁' },
-  { label: 'Math.hyperpfq', type: 'function', detail: 'generalized pFq' },
-  // Math static methods - special functions (elliptic)
-  { label: 'Math.elliptic_k', type: 'function', detail: 'complete elliptic K(m)' },
-  { label: 'Math.elliptic_e', type: 'function', detail: 'complete elliptic E(m)' },
-  { label: 'Math.elliptic_pi', type: 'function', detail: 'complete elliptic Π(n,m)' },
-  // Math static methods - special functions (other)
-  { label: 'Math.zeta', type: 'function', detail: 'Riemann zeta ζ(s)' },
-  { label: 'Math.polylog', type: 'function', detail: 'polylogarithm Li_s(z)' },
-  { label: 'Math.dirac', type: 'function', detail: 'Dirac delta δ(x)' },
-  { label: 'Math.heaviside', type: 'function', detail: 'Heaviside θ(x)' },
-  { label: 'Math.kronecker', type: 'function', detail: 'Kronecker δ_ij' },
-  { label: 'Math.levi_civita', type: 'function', detail: 'Levi-Civita ε_ijk' },
-  // Math static methods - function composition
-  { label: 'Math.function', type: 'function', detail: 'create symbolic function' },
-  { label: 'Math.get_function', type: 'function', detail: 'retrieve saved function' },
-  { label: 'Math.list_functions', type: 'function', detail: 'list saved functions' },
+  // CM qm - constants
+  { label: 'ATOMIC_NUMBERS', type: 'constant', detail: 'cm.qm: atomic numbers' },
+  { label: 'ELEMENT_SYMBOLS', type: 'constant', detail: 'cm.qm: element symbols' },
+  { label: 'AUFBAU_ORDER', type: 'constant', detail: 'cm.qm: aufbau order' },
+  // CM qm - classes
+  { label: 'CoordinateType', type: 'class', detail: 'cm.qm: CoordinateType' },
+  { label: 'Coordinate3D', type: 'class', detail: 'cm.qm: Coordinate3D' },
+  { label: 'SpinOrbital', type: 'class', detail: 'cm.qm: SpinOrbital' },
+  { label: 'SlaterDeterminant', type: 'class', detail: 'cm.qm: SlaterDeterminant' },
+  { label: 'Operator', type: 'class', detail: 'cm.qm: Operator' },
+  { label: 'Overlap', type: 'class', detail: 'cm.qm: Overlap' },
+  { label: 'MatrixElement', type: 'class', detail: 'cm.qm: MatrixElement' },
+  { label: 'DiracSpinor', type: 'class', detail: 'cm.qm: DiracSpinor' },
+  { label: 'DiracDeterminant', type: 'class', detail: 'cm.qm: DiracDeterminant' },
+  { label: 'RelativisticOperator', type: 'class', detail: 'cm.qm: RelativisticOperator' },
+  { label: 'ElectronConfiguration', type: 'class', detail: 'cm.qm: ElectronConfiguration' },
+  { label: 'Atom', type: 'class', detail: 'cm.qm: Atom' },
+  { label: 'Molecule', type: 'class', detail: 'cm.qm: Molecule' },
+  { label: 'HamiltonianTerm', type: 'class', detail: 'cm.qm: HamiltonianTerm' },
+  { label: 'HamiltonianBuilder', type: 'class', detail: 'cm.qm: HamiltonianBuilder' },
+  { label: 'MolecularHamiltonian', type: 'class', detail: 'cm.qm: MolecularHamiltonian' },
+  { label: 'MatrixExpression', type: 'class', detail: 'cm.qm: MatrixExpression' },
+  { label: 'HamiltonianMatrix', type: 'class', detail: 'cm.qm: HamiltonianMatrix' },
+  // CM qm - functions
+  { label: 'coord3d', type: 'function', detail: 'cm.qm: coord3d' },
+  { label: 'spherical_coord', type: 'function', detail: 'cm.qm: spherical_coord' },
+  { label: 'cartesian_coord', type: 'function', detail: 'cm.qm: cartesian_coord' },
+  { label: 'spin_orbital', type: 'function', detail: 'cm.qm: spin_orbital' },
+  { label: 'basis_orbital', type: 'function', detail: 'cm.qm: basis_orbital' },
+  { label: 'basis_orbitals', type: 'function', detail: 'cm.qm: basis_orbitals' },
+  { label: 'slater', type: 'function', detail: 'cm.qm: slater' },
+  { label: 'hamiltonian', type: 'function', detail: 'cm.qm: hamiltonian' },
+  { label: 'one_electron_operator', type: 'function', detail: 'cm.qm: one_electron_operator' },
+  { label: 'two_electron_operator', type: 'function', detail: 'cm.qm: two_electron_operator' },
+  { label: 'dirac_spinor', type: 'function', detail: 'cm.qm: dirac_spinor' },
+  { label: 'dirac_spinor_lj', type: 'function', detail: 'cm.qm: dirac_spinor_lj' },
+  { label: 'basis_dirac', type: 'function', detail: 'cm.qm: basis_dirac' },
+  { label: 'dirac_slater', type: 'function', detail: 'cm.qm: dirac_slater' },
+  { label: 'dirac_hamiltonian', type: 'function', detail: 'cm.qm: dirac_hamiltonian' },
+  { label: 'kappa_from_lj', type: 'function', detail: 'cm.qm: kappa_from_lj' },
+  { label: 'atom', type: 'function', detail: 'cm.qm: atom' },
+  { label: 'atoms', type: 'function', detail: 'cm.qm: atoms' },
+  { label: 'ground_state', type: 'function', detail: 'cm.qm: ground_state' },
+  { label: 'config_from_string', type: 'function', detail: 'cm.qm: config_from_string' },
+  { label: 'molecule', type: 'function', detail: 'cm.qm: molecule' },
+  { label: 'spherical_harmonic_orthogonality', type: 'function', detail: 'cm.qm: spherical_harmonic_orthogonality' },
+  { label: 'cm.symbols', type: 'module', detail: 'Chemical Machines Symbols Package' },
+  { label: 'from cm.symbols import', type: 'text', detail: 'import CM symbols' },
+  // CM symbols - classes
+  { label: 'Math', type: 'class', detail: 'cm.symbols: Math' },
+  { label: 'Expr', type: 'class', detail: 'cm.symbols: Expr' },
+  { label: 'Var', type: 'class', detail: 'cm.symbols: Var' },
+  { label: 'Const', type: 'class', detail: 'cm.symbols: Const' },
+  { label: 'Sum', type: 'class', detail: 'cm.symbols: Sum' },
+  { label: 'Product', type: 'class', detail: 'cm.symbols: Product' },
+  { label: 'Scalar', type: 'class', detail: 'cm.symbols: Scalar' },
+  { label: 'ExprType', type: 'class', detail: 'cm.symbols: ExprType' },
+  { label: 'BoundsType', type: 'class', detail: 'cm.symbols: BoundsType' },
+  { label: 'SymbolicFunction', type: 'class', detail: 'cm.symbols: SymbolicFunction' },
+  { label: 'BoundFunction', type: 'class', detail: 'cm.symbols: BoundFunction' },
+  { label: 'ComputeGraph', type: 'class', detail: 'cm.symbols: ComputeGraph' },
+  { label: 'TorchFunction', type: 'class', detail: 'cm.symbols: TorchFunction' },
+  { label: 'TorchGradFunction', type: 'class', detail: 'cm.symbols: TorchGradFunction' },
+  { label: 'SpecialFunction', type: 'class', detail: 'cm.symbols: SpecialFunction' },
+  { label: 'Gamma', type: 'class', detail: 'cm.symbols: Gamma' },
+  { label: 'LogGamma', type: 'class', detail: 'cm.symbols: LogGamma' },
+  { label: 'Digamma', type: 'class', detail: 'cm.symbols: Digamma' },
+  { label: 'Beta', type: 'class', detail: 'cm.symbols: Beta' },
+  { label: 'Factorial', type: 'class', detail: 'cm.symbols: Factorial' },
+  { label: 'DoubleFactorial', type: 'class', detail: 'cm.symbols: DoubleFactorial' },
+  { label: 'Binomial', type: 'class', detail: 'cm.symbols: Binomial' },
+  { label: 'Erf', type: 'class', detail: 'cm.symbols: Erf' },
+  { label: 'Erfc', type: 'class', detail: 'cm.symbols: Erfc' },
+  { label: 'Erfi', type: 'class', detail: 'cm.symbols: Erfi' },
+  { label: 'BesselJ', type: 'class', detail: 'cm.symbols: BesselJ' },
+  { label: 'BesselY', type: 'class', detail: 'cm.symbols: BesselY' },
+  { label: 'BesselI', type: 'class', detail: 'cm.symbols: BesselI' },
+  { label: 'BesselK', type: 'class', detail: 'cm.symbols: BesselK' },
+  { label: 'SphericalBesselJ', type: 'class', detail: 'cm.symbols: SphericalBesselJ' },
+  { label: 'SphericalBesselY', type: 'class', detail: 'cm.symbols: SphericalBesselY' },
+  { label: 'Hankel1', type: 'class', detail: 'cm.symbols: Hankel1' },
+  { label: 'Hankel2', type: 'class', detail: 'cm.symbols: Hankel2' },
+  { label: 'AiryAi', type: 'class', detail: 'cm.symbols: AiryAi' },
+  { label: 'AiryBi', type: 'class', detail: 'cm.symbols: AiryBi' },
+  { label: 'AiryAiPrime', type: 'class', detail: 'cm.symbols: AiryAiPrime' },
+  { label: 'AiryBiPrime', type: 'class', detail: 'cm.symbols: AiryBiPrime' },
+  { label: 'Legendre', type: 'class', detail: 'cm.symbols: Legendre' },
+  { label: 'AssocLegendre', type: 'class', detail: 'cm.symbols: AssocLegendre' },
+  { label: 'Hermite', type: 'class', detail: 'cm.symbols: Hermite' },
+  { label: 'HermiteProb', type: 'class', detail: 'cm.symbols: HermiteProb' },
+  { label: 'Laguerre', type: 'class', detail: 'cm.symbols: Laguerre' },
+  { label: 'AssocLaguerre', type: 'class', detail: 'cm.symbols: AssocLaguerre' },
+  { label: 'Chebyshev1', type: 'class', detail: 'cm.symbols: Chebyshev1' },
+  { label: 'Chebyshev2', type: 'class', detail: 'cm.symbols: Chebyshev2' },
+  { label: 'Gegenbauer', type: 'class', detail: 'cm.symbols: Gegenbauer' },
+  { label: 'Jacobi', type: 'class', detail: 'cm.symbols: Jacobi' },
+  { label: 'SphericalHarmonic', type: 'class', detail: 'cm.symbols: SphericalHarmonic' },
+  { label: 'RealSphericalHarmonic', type: 'class', detail: 'cm.symbols: RealSphericalHarmonic' },
+  { label: 'Hypergeometric2F1', type: 'class', detail: 'cm.symbols: Hypergeometric2F1' },
+  { label: 'Hypergeometric1F1', type: 'class', detail: 'cm.symbols: Hypergeometric1F1' },
+  { label: 'Hypergeometric0F1', type: 'class', detail: 'cm.symbols: Hypergeometric0F1' },
+  { label: 'HypergeometricPFQ', type: 'class', detail: 'cm.symbols: HypergeometricPFQ' },
+  { label: 'EllipticK', type: 'class', detail: 'cm.symbols: EllipticK' },
+  { label: 'EllipticE', type: 'class', detail: 'cm.symbols: EllipticE' },
+  { label: 'EllipticPi', type: 'class', detail: 'cm.symbols: EllipticPi' },
+  { label: 'Zeta', type: 'class', detail: 'cm.symbols: Zeta' },
+  { label: 'PolyLog', type: 'class', detail: 'cm.symbols: PolyLog' },
+  { label: 'DiracDelta', type: 'class', detail: 'cm.symbols: DiracDelta' },
+  { label: 'Heaviside', type: 'class', detail: 'cm.symbols: Heaviside' },
+  { label: 'KroneckerDelta', type: 'class', detail: 'cm.symbols: KroneckerDelta' },
+  { label: 'LeviCivita', type: 'class', detail: 'cm.symbols: LeviCivita' },
+  { label: 'ClebschGordan', type: 'class', detail: 'cm.symbols: ClebschGordan' },
+  { label: 'Wigner3j', type: 'class', detail: 'cm.symbols: Wigner3j' },
+  { label: 'Wigner6j', type: 'class', detail: 'cm.symbols: Wigner6j' },
+  { label: 'Wigner9j', type: 'class', detail: 'cm.symbols: Wigner9j' },
+  { label: 'DifferentialOperator', type: 'class', detail: 'cm.symbols: DifferentialOperator' },
+  { label: 'PartialDerivative', type: 'class', detail: 'cm.symbols: PartialDerivative' },
+  { label: 'Gradient', type: 'class', detail: 'cm.symbols: Gradient' },
+  { label: 'Laplacian', type: 'class', detail: 'cm.symbols: Laplacian' },
+  { label: 'HydrogenRadial', type: 'class', detail: 'cm.symbols: HydrogenRadial' },
+  { label: 'HydrogenOrbital', type: 'class', detail: 'cm.symbols: HydrogenOrbital' },
+  { label: 'SlaterTypeOrbital', type: 'class', detail: 'cm.symbols: SlaterTypeOrbital' },
+  { label: 'GaussianTypeOrbital', type: 'class', detail: 'cm.symbols: GaussianTypeOrbital' },
+  { label: 'ContractedGTO', type: 'class', detail: 'cm.symbols: ContractedGTO' },
+  // CM symbols - functions
+  { label: 'latex', type: 'function', detail: 'cm.symbols: latex' },
+  { label: 'equation', type: 'function', detail: 'cm.symbols: equation' },
+  { label: 'align', type: 'function', detail: 'cm.symbols: align' },
+  { label: 'matrix', type: 'function', detail: 'cm.symbols: matrix' },
+  { label: 'bullets', type: 'function', detail: 'cm.symbols: bullets' },
+  { label: 'numbered', type: 'function', detail: 'cm.symbols: numbered' },
+  { label: 'items', type: 'function', detail: 'cm.symbols: items' },
+  { label: 'set_notation', type: 'function', detail: 'cm.symbols: set_notation' },
+  { label: 'set_line_height', type: 'function', detail: 'cm.symbols: set_line_height' },
+  { label: 'chemical', type: 'function', detail: 'cm.symbols: chemical' },
+  { label: 'reaction', type: 'function', detail: 'cm.symbols: reaction' },
+  { label: 'fraction', type: 'function', detail: 'cm.symbols: fraction' },
+  { label: 'sqrt', type: 'function', detail: 'cm.symbols: sqrt' },
+  { label: 'cm.views', type: 'module', detail: 'Chemical Machines Views Package' },
+  { label: 'from cm.views import', type: 'text', detail: 'import CM views' },
+  // CM views - constants
+  { label: 'ELEMENT_DATA', type: 'constant', detail: 'cm.views: element data' },
+  // CM views - classes
+  { label: 'COLORMAPS', type: 'class', detail: 'cm.views: COLORMAPS' },
+  // CM views - functions
+  { label: 'html', type: 'function', detail: 'cm.views: html' },
+  { label: 'text', type: 'function', detail: 'cm.views: text' },
+  { label: 'log', type: 'function', detail: 'cm.views: log' },
+  { label: 'clear', type: 'function', detail: 'cm.views: clear' },
+  { label: 'image', type: 'function', detail: 'cm.views: image' },
+  { label: 'savefig', type: 'function', detail: 'cm.views: savefig' },
+  { label: 'dataframe', type: 'function', detail: 'cm.views: dataframe' },
+  { label: 'table', type: 'function', detail: 'cm.views: table' },
+  { label: 'scatter_3d', type: 'function', detail: 'cm.views: scatter_3d' },
+  { label: 'surface', type: 'function', detail: 'cm.views: surface' },
+  { label: 'molecule', type: 'function', detail: 'cm.views: molecule' },
+  { label: 'crystal', type: 'function', detail: 'cm.views: crystal' },
 ]
 
 // Math builder method completions (shown after typing "m." where m is a Math instance)
@@ -573,11 +633,50 @@ const props = defineProps({
   htmlOutput: { type: String, default: '' }
 })
 
-const emit = defineEmits(['update', 'run', 'delete', 'blur'])
+const emit = defineEmits(['update', 'run', 'delete', 'blur', 'create-below', 'reorder', 'interrupt'])
 
 const editorContainer = ref(null)
 const isFocused = ref(false)
+const isDragOver = ref(false)
+const isDragging = ref(false)
 let editorView = null
+
+// Drag-and-drop handlers
+function handleDragStart(event) {
+  event.dataTransfer.effectAllowed = 'move'
+  event.dataTransfer.setData('text/plain', props.index.toString())
+  isDragging.value = true
+}
+
+function handleDragEnd(event) {
+  isDragging.value = false
+  isDragOver.value = false
+}
+
+function handleDragOver(event) {
+  event.preventDefault()
+  event.dataTransfer.dropEffect = 'move'
+  isDragOver.value = true
+}
+
+function handleDragLeave(event) {
+  // Only clear if we're actually leaving the cell
+  if (event.target.classList.contains('cell')) {
+    isDragOver.value = false
+  }
+}
+
+function handleDrop(event) {
+  event.preventDefault()
+  isDragOver.value = false
+
+  const fromIndex = parseInt(event.dataTransfer.getData('text/plain'))
+  const toIndex = props.index
+
+  if (fromIndex !== toIndex) {
+    emit('reorder', { fromIndex, toIndex })
+  }
+}
 
 const languageExtensions = {
   python: () => StreamLanguage.define(pythonLegacy),
@@ -668,17 +767,39 @@ function createEditor() {
         },
         preventDefault: true
       },
-      // Explicit Enter key handling to prevent autocomplete from interfering
+      {
+        key: 'Alt-Enter',
+        run: () => {
+          emit('create-below')
+          return true
+        },
+        preventDefault: true
+      },
+      // Tab accepts autocomplete, or indents if no completion is active
+      {
+        key: 'Tab',
+        run: (view) => {
+          // First try to accept completion
+          if (acceptCompletion(view)) {
+            return true
+          }
+          // If no completion to accept, indent instead
+          return indentMore(view)
+        },
+      },
+      // Ctrl+Space to manually trigger autocomplete
+      {
+        key: 'Ctrl-Space',
+        run: startCompletion,
+      },
+      // Enter just inserts a newline, never accepts completion
       {
         key: 'Enter',
         run: insertNewlineAndIndent,
       },
       ...defaultKeymap,
       ...historyKeymap,
-      indentWithTab,
     ]),
-    // Completion keymap separate so it doesn't override Enter behavior
-    keymap.of(completionKeymap),
 
     EditorView.updateListener.of((update) => {
       if (update.docChanged) {
@@ -827,11 +948,21 @@ onUnmounted(() => {
   border-radius: 6px;
   margin-bottom: 0.5rem;
   overflow: hidden;
-  transition: border-color 0.2s;
+  transition: border-color 0.2s, transform 0.2s, opacity 0.2s;
 }
 
 .cell.focused {
   border-color: var(--accent);
+}
+
+.cell.dragging {
+  opacity: 0.5;
+}
+
+.cell.drag-over {
+  border-color: var(--success);
+  transform: scale(1.02);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
 }
 
 .cell-toolbar {
@@ -841,6 +972,24 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.5rem;
   border-bottom: 1px solid var(--border);
+}
+
+.drag-handle {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  cursor: grab;
+  user-select: none;
+  opacity: 0.5;
+  transition: opacity 0.2s;
+  padding: 0 0.25rem;
+}
+
+.drag-handle:hover {
+  opacity: 1;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
 }
 
 .cell-number {
@@ -891,7 +1040,7 @@ onUnmounted(() => {
   flex: 1;
 }
 
-.run-btn, .delete-btn {
+.run-btn, .delete-btn, .create-below-btn, .interrupt-btn {
   width: 22px;
   height: 22px;
   padding: 0;
@@ -902,6 +1051,19 @@ onUnmounted(() => {
   border-radius: 4px;
   border: none;
   cursor: pointer;
+  transition: all 0.2s;
+}
+
+.create-below-btn {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+.create-below-btn:hover {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
 }
 
 .run-btn {
@@ -913,6 +1075,17 @@ onUnmounted(() => {
   opacity: 0.9;
 }
 
+.interrupt-btn {
+  background: #f59e0b;
+  color: white;
+  animation: pulse-interrupt 1.5s ease-in-out infinite;
+}
+
+.interrupt-btn:hover {
+  background: #d97706;
+  animation: none;
+}
+
 .delete-btn {
   background: transparent;
   color: var(--text-secondary);
@@ -921,6 +1094,11 @@ onUnmounted(() => {
 .delete-btn:hover {
   background: var(--error);
   color: white;
+}
+
+@keyframes pulse-interrupt {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
 }
 
 .spinner {

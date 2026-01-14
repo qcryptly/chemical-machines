@@ -1,0 +1,9 @@
+{
+  "name": "cm-scripts",
+  "version": "1.0.0",
+  "description": "Chemical Machines build and automation scripts",
+  "private": true,
+  "dependencies": {
+    "chokidar": "^3.5.3"
+  }
+}

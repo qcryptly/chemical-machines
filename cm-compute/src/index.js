@@ -180,6 +180,144 @@ app.get('/compute/:jobId', async (req, res) => {
   }
 });
 
+// ================== Code Completion ==================
+
+// Dynamic autocomplete using jedi
+app.post('/api/complete', async (req, res) => {
+  const { code, cursor_pos, workspace_id, kernel_id } = req.body;
+
+  console.log('[Autocomplete] Received request:', {
+    code: code.substring(0, 50) + '...',
+    cursor_pos,
+    workspace_id,
+    kernel_id
+  });
+
+  if (!code || cursor_pos === undefined) {
+    console.log('[Autocomplete] Missing required params');
+    return res.status(400).json({ error: 'Missing code or cursor_pos', completions: [] });
+  }
+
+  try {
+    // Convert cursor_pos (character offset) to line/column
+    const lines = code.substring(0, cursor_pos).split('\n');
+    const line = lines.length;
+    const column = lines[lines.length - 1].length;
+
+    console.log('[Autocomplete] Cursor position:', { line, column });
+
+    // Build Python code to execute autocomplete
+    const escapedCode = JSON.stringify(code);
+    const completionCode = `
+import json
+import sys
+import importlib.util
+
+# Import autocomplete module without triggering full cm package import
+spec = importlib.util.spec_from_file_location(
+    'autocomplete',
+    '/app/cm-libraries/python/cm/autocomplete.py'
+)
+autocomplete = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(autocomplete)
+
+# Get completions
+completions = autocomplete.get_completions(${escapedCode}, line=${line}, column=${column})
+
+# Output debug info and completions as JSON with debug field
+result = {
+    'completions': completions,
+    'debug': {
+        'code': ${escapedCode},
+        'line': ${line},
+        'column': ${column},
+        'count': len(completions)
+    }
+}
+print(json.dumps(result))
+`;
+
+    console.log('[Autocomplete] Generated Python code:', completionCode.substring(0, 300));
+
+    // Create job to execute in Python kernel
+    const job = await Job.create({
+      type: 'execute',
+      params: {
+        code: completionCode,
+        // Don't specify environment - use default (torch) which now has jedi installed
+        usePersistentKernel: false,  // Don't use persistent kernel for autocomplete
+        timeout: 2000  // 2 second timeout for autocomplete
+      },
+      priority: 10  // High priority for autocomplete
+    });
+
+    const jobId = job.id.toString();
+    logger.job('QUEUED', jobId, { type: 'autocomplete' });
+
+    // Execute job with timeout
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Autocomplete timeout')), 1500)
+    );
+
+    const jobPromise = new Promise((resolve, reject) => {
+      computeQueue.enqueue({ ...job, id: jobId }, async (result) => {
+        console.log('[Autocomplete] Job callback received:', {
+          error: result.error,
+          output: result.output ? result.output.substring(0, 200) : null,
+          stderrFull: result.stderr,  // Full stderr for debugging
+          hasResult: !!result
+        });
+
+        if (result.error) {
+          reject(new Error(result.error));
+        } else {
+          resolve(result);
+        }
+        await Job.updateStatus(job.id, result.error ? 'failed' : 'completed', result);
+      });
+    });
+
+    // Wait for result or timeout
+    const result = await Promise.race([jobPromise, timeoutPromise]);
+
+    console.log('[Autocomplete] Job result:', {
+      isArray: Array.isArray(result),
+      type: typeof result,
+      hasOutput: !!result.output,
+      keys: result && typeof result === 'object' ? Object.keys(result) : null
+    });
+
+    // The result should be an object with {completions: [], debug: {}}
+    let completions = [];
+    if (result && result.error) {
+      console.error('[Autocomplete] Job error:', {
+        error: result.error,
+        stderr: result.stderr ? result.stderr.substring(0, 500) : null
+      });
+      return res.json({ completions: [], error: result.error });
+    } else if (result && result.completions) {
+      completions = result.completions;
+      console.log('[Autocomplete] Got completions:', {
+        count: completions.length,
+        debug: result.debug
+      });
+    } else if (Array.isArray(result)) {
+      // Fallback: Old format where result is the array directly
+      completions = result;
+      console.log('[Autocomplete] Got completions array directly:', completions.length);
+    } else {
+      console.warn('[Autocomplete] Unexpected result format:', result);
+    }
+
+    res.json({ completions });
+
+  } catch (error) {
+    console.error('Autocomplete error:', error);
+    // Return empty completions on error (graceful degradation)
+    res.status(200).json({ completions: [], error: error.message });
+  }
+});
+
 // ================== Conda Environment Management ==================
 
 // List all conda environments

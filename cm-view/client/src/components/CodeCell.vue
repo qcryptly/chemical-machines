@@ -70,6 +70,7 @@ import { StreamLanguage } from '@codemirror/language'
 import { shell } from '@codemirror/legacy-modes/mode/shell'
 import { python as pythonLegacy } from '@codemirror/legacy-modes/mode/python'
 import { tags } from '@lezer/highlight'
+import axios from 'axios'
 
 // Python completions - common builtins, keywords, and scientific computing
 const pythonCompletions = [
@@ -1801,7 +1802,9 @@ const props = defineProps({
   cell: { type: Object, required: true },
   index: { type: Number, required: true },
   language: { type: String, default: 'python' },
-  htmlOutput: { type: String, default: '' }
+  htmlOutput: { type: String, default: '' },
+  workspaceId: { type: [String, Number], default: null },
+  kernelId: { type: String, default: 'default' }
 })
 
 const emit = defineEmits(['update', 'run', 'delete', 'blur', 'create-below', 'reorder', 'interrupt'])
@@ -1862,8 +1865,80 @@ function getLanguageExtension(lang) {
   return factory()
 }
 
-// Smart Python completion that detects context
-function pythonCompleter(context) {
+// ================== Dynamic Autocomplete Support ==================
+
+// Completion cache to avoid redundant API calls
+const completionCache = new Map()
+const CACHE_TTL = 5000  // 5 seconds
+
+function getCacheKey(code, pos) {
+  // Use a window around cursor position for cache key
+  const start = Math.max(0, pos - 100)
+  const window = code.substring(start, pos)
+  return `${window}_${pos}`
+}
+
+// Fetch dynamic completions from backend
+async function fetchDynamicCompletions(code, cursorPos) {
+  const cacheKey = getCacheKey(code, cursorPos)
+  const cached = completionCache.get(cacheKey)
+
+  // Return cached result if still valid
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.data
+  }
+
+  try {
+    const response = await axios.post('/api/complete', {
+      code,
+      cursor_pos: cursorPos,
+      workspace_id: props.workspaceId,
+      kernel_id: props.kernelId
+    }, {
+      timeout: 1500  // 1.5 second timeout
+    })
+
+    const completions = response.data.completions || []
+
+    // Cache the result
+    completionCache.set(cacheKey, {
+      data: completions,
+      timestamp: Date.now()
+    })
+
+    return completions
+  } catch (error) {
+    console.warn('Dynamic completion failed:', error.message)
+    return []
+  }
+}
+
+// Convert jedi completion to CodeMirror format
+function convertJediCompletion(jediComp) {
+  const docPreview = jediComp.docstring ? jediComp.docstring.substring(0, 50) : null
+
+  // Build info text (shown in tooltip)
+  let info = ''
+  if (jediComp.signature) {
+    info = jediComp.signature
+    if (jediComp.docstring) {
+      info += '\n\n' + jediComp.docstring
+    }
+  } else if (jediComp.docstring) {
+    info = jediComp.docstring
+  }
+
+  return {
+    label: jediComp.name,
+    type: jediComp.type,  // CodeMirror supports: function, variable, type, keyword, etc.
+    detail: jediComp.signature || docPreview || jediComp.type,
+    info: info || undefined,
+    apply: jediComp.name  // Explicitly set what gets inserted
+  }
+}
+
+// Smart Python completion that detects context and fetches dynamic completions
+async function pythonCompleter(context) {
   const word = context.matchBefore(/[\w.]*/)
   if (!word || (word.from === word.to && !context.explicit)) return null
 
@@ -1871,40 +1946,91 @@ function pythonCompleter(context) {
   const doc = context.state.doc.toString()
   const pos = context.pos
 
-  // Check if we're typing after a dot (method completion)
-  if (text.includes('.')) {
-    const parts = text.split('.')
-    const varName = parts.slice(0, -1).join('.')
-    const methodPrefix = parts[parts.length - 1]
+  // Detect if we're typing after a dot (instance method completion)
+  const needsDynamic = text.includes('.') && /\w+\.$/.test(text)
 
-    // Look backwards in the document to find if this variable was assigned from Math()
-    const beforeCursor = doc.slice(0, pos - text.length)
-    const mathPattern = new RegExp(`${varName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*=\\s*Math\\(`, 'm')
+  // Debug logging
+  if (needsDynamic) {
+    console.log('[Autocomplete] Dynamic completion triggered', { text, pos, language: props.language })
+  }
 
-    if (mathPattern.test(beforeCursor)) {
-      // This is a Math instance - show Math methods
-      const filtered = mathMethodCompletions.filter(c =>
-        c.label.toLowerCase().startsWith(methodPrefix.toLowerCase())
-      )
-      if (filtered.length > 0) {
-        return {
-          from: word.from + varName.length + 1,  // After the dot
-          options: filtered
+  let options = []
+  let completionFrom = word.from  // Default to start of word
+
+  // Try dynamic completion for instance methods
+  if (needsDynamic && props.language === 'python') {
+    try {
+      console.log('[Autocomplete] Fetching dynamic completions...')
+      const dynamicResults = await fetchDynamicCompletions(doc, pos)
+      console.log('[Autocomplete] Got dynamic results:', dynamicResults.length)
+
+      if (dynamicResults.length > 0) {
+        // Convert jedi completions to CodeMirror format
+        const dynamicOptions = dynamicResults.map(convertJediCompletion)
+        options = dynamicOptions
+
+        // For dynamic completion after a dot, set 'from' to be after the dot
+        // So typing "obj." will complete from the position after the dot
+        const dotIndex = text.lastIndexOf('.')
+        if (dotIndex !== -1) {
+          completionFrom = word.from + dotIndex + 1
         }
+
+        console.log('[Autocomplete] Using dynamic options:', dynamicOptions.length)
+        console.log('[Autocomplete] Sample options:', dynamicOptions.slice(0, 3))
+        console.log('[Autocomplete] Completion from position:', completionFrom, 'vs word.from:', word.from)
       }
+    } catch (error) {
+      console.warn('[Autocomplete] Dynamic completion error:', error)
     }
   }
 
-  // Default: show general Python completions
-  const completions = getCompletions('python')
-  const filtered = completions.filter(c =>
-    c.label.toLowerCase().startsWith(text.toLowerCase())
-  )
+  // Fallback to static completions if no dynamic results
+  if (options.length === 0) {
+    // Check if we're typing after a dot for static class methods
+    if (text.includes('.')) {
+      const parts = text.split('.')
+      const varName = parts.slice(0, -1).join('.')
+      const methodPrefix = parts[parts.length - 1]
 
-  return {
-    from: word.from,
-    options: filtered
+      // Look backwards to find if this variable was assigned from Math()
+      const beforeCursor = doc.slice(0, pos - text.length)
+      const mathPattern = new RegExp(`${varName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*=\\s*Math\\(`, 'm')
+
+      if (mathPattern.test(beforeCursor)) {
+        // This is a Math instance - show Math methods
+        const filtered = mathMethodCompletions.filter(c =>
+          c.label.toLowerCase().startsWith(methodPrefix.toLowerCase())
+        )
+        if (filtered.length > 0) {
+          return {
+            from: word.from + varName.length + 1,  // After the dot
+            options: filtered
+          }
+        }
+      }
+    }
+
+    // Default: show general static Python completions
+    const completions = getCompletions('python')
+    options = completions.filter(c =>
+      c.label.toLowerCase().startsWith(text.toLowerCase())
+    )
   }
+
+  const result = {
+    from: completionFrom,
+    options,
+    validFor: /^[\w.]*$/
+  }
+
+  console.log('[Autocomplete] Returning result:', {
+    from: result.from,
+    optionsCount: result.options.length,
+    text
+  })
+
+  return result
 }
 
 function createEditor() {

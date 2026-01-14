@@ -844,6 +844,20 @@ app.get('/api/compute/:jobId', async (req, res) => {
   }
 });
 
+// Autocomplete proxy
+app.post('/api/complete', async (req, res) => {
+  try {
+    const response = await axios.post(`${COMPUTE_URL}/api/complete`, req.body, {
+      timeout: 2000  // 2 second timeout for autocomplete
+    });
+    res.json(response.data);
+  } catch (error) {
+    console.error('Error fetching autocomplete:', error);
+    // Return empty completions on error (graceful degradation)
+    res.status(200).json({ completions: [], error: error.message });
+  }
+});
+
 // ================== Conda Environment Proxy ==================
 
 // List environments

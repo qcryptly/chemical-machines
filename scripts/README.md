@@ -123,3 +123,31 @@ To add support for additional autocomplete sources:
 **Build failing?**
 - Ensure chokidar is installed: `cd scripts && npm install`
 - Check Node.js version compatibility (requires Node 14+)
+
+---
+
+## Workspace README Sync
+
+**File**: `sync-workspace-readmes.js`
+
+Copies the library reference `workspaces/README.md` to all existing workspace directories that don't already have it.
+
+### Usage
+
+```bash
+# Sync README to all existing workspaces
+node scripts/sync-workspace-readmes.js
+```
+
+### Automatic Sync
+
+The README.md is automatically copied to new workspaces when they are created via the `copyTemplateToWorkspace` function in the cm-view server.
+
+### What It Does
+
+1. Reads the source README from `workspaces/README.md`
+2. Scans all directories in the `workspace/` folder
+3. For each workspace without a README.md, copies the library reference
+4. Skips workspaces that already have a README.md (preserves user customizations)
+
+This ensures all workspaces have access to the comprehensive library documentation.

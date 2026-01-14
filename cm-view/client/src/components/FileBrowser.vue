@@ -24,6 +24,7 @@
           v-for="item in files"
           :key="item.path"
           :item="item"
+          :workspace-id="workspaceId"
           :selected-path="selectedPath"
           :selected-paths="selectedPaths"
           @select="selectItem"
@@ -180,8 +181,13 @@ async function refresh() {
   loading.value = true
   error.value = null
   try {
-    const response = await axios.get(fileApiUrl())
-    files.value = response.data.files || []
+    const response = await axios.get(fileApiUrl(), {
+      params: {
+        depth: 1,  // Load root level with one level of children
+        limit: 1000
+      }
+    })
+    files.value = response.data.items || []
   } catch (err) {
     error.value = err.response?.data?.error || err.message
     files.value = []

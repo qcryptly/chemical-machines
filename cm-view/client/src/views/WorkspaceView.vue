@@ -1,7 +1,7 @@
 <template>
   <div class="workspace">
     <!-- Left Sidebar with Tabs -->
-    <div class="left-sidebar" :class="{ collapsed: !sidebarOpen }">
+    <div class="left-sidebar" :class="{ collapsed: !sidebarOpen }" :style="{ width: sidebarOpen ? sidebarWidth + 'px' : '40px' }">
       <div class="sidebar-header">
         <div class="sidebar-tabs" v-if="sidebarOpen">
           <button
@@ -190,6 +190,9 @@
         </template>
       </div>
     </div>
+
+    <!-- Resize Handle (Vertical) for Sidebar -->
+    <div v-if="sidebarOpen" class="resize-handle-v" @pointerdown="startSidebarResize"></div>
 
     <!-- Main Content -->
     <div class="main-content">
@@ -718,6 +721,9 @@ const htmlOutputs = computed(() => {
   }
   return []
 })
+
+// Sidebar state
+const sidebarWidth = ref(240)
 
 // Visualizer state
 const visualizerHeight = ref(400)
@@ -1834,6 +1840,66 @@ function stopResize() {
   document.body.style.cursor = ''
 }
 
+// ================== Sidebar Resize ==================
+
+let isSidebarResizing = false
+
+function startSidebarResize(e) {
+  e.preventDefault()
+  isSidebarResizing = true
+
+  // Add overlay to capture pointer events
+  const overlay = document.createElement('div')
+  overlay.id = 'sidebar-resize-overlay'
+  overlay.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 9999;
+    cursor: col-resize;
+  `
+  document.body.appendChild(overlay)
+
+  document.addEventListener('pointermove', doSidebarResize)
+  document.addEventListener('pointerup', stopSidebarResize)
+  document.addEventListener('pointercancel', stopSidebarResize)
+  window.addEventListener('blur', stopSidebarResize)
+  document.body.style.userSelect = 'none'
+  document.body.style.cursor = 'col-resize'
+}
+
+function doSidebarResize(e) {
+  if (!isSidebarResizing) return
+  e.preventDefault()
+
+  const newWidth = e.clientX
+
+  // Set min/max widths
+  if (newWidth >= 150 && newWidth <= 600) {
+    sidebarWidth.value = newWidth
+  }
+}
+
+function stopSidebarResize() {
+  if (!isSidebarResizing) return
+  isSidebarResizing = false
+
+  // Remove overlay
+  const overlay = document.getElementById('sidebar-resize-overlay')
+  if (overlay && overlay.parentNode) {
+    overlay.parentNode.removeChild(overlay)
+  }
+
+  document.removeEventListener('pointermove', doSidebarResize)
+  document.removeEventListener('pointerup', stopSidebarResize)
+  document.removeEventListener('pointercancel', stopSidebarResize)
+  window.removeEventListener('blur', stopSidebarResize)
+  document.body.style.userSelect = ''
+  document.body.style.cursor = ''
+}
+
 // ================== Keyboard Shortcuts ==================
 
 function handleKeydown(e) {
@@ -1881,16 +1947,18 @@ onUnmounted(() => {
 
 /* Left Sidebar */
 .left-sidebar {
-  width: 240px;
+  min-width: 150px;
+  max-width: 600px;
   background: var(--bg-secondary);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  transition: width 0.2s;
+  flex-shrink: 0;
 }
 
 .left-sidebar.collapsed {
-  width: 40px;
+  min-width: 40px;
+  max-width: 40px;
 }
 
 .sidebar-header {
@@ -2302,6 +2370,19 @@ onUnmounted(() => {
 }
 
 .resize-handle-h:hover {
+  background: var(--accent);
+}
+
+/* Vertical resize handle for sidebar */
+.resize-handle-v {
+  width: 6px;
+  background: var(--border);
+  cursor: col-resize;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.resize-handle-v:hover {
   background: var(--accent);
 }
 

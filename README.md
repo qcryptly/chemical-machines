@@ -65,7 +65,7 @@ docker compose logs -f chemical-machines
 
 Once services are running:
 
-- **Web Interface**: http://localhost:3000 (interactive notebooks)
+- **Web Interface**: http://localhost:5173 (interactive notebooks)
 - **Kibana**: http://localhost:5601 (Elasticsearch data browser)
 - **PostgreSQL**: localhost:5432 (database access)
 - **Elasticsearch**: localhost:9200 (search API)
@@ -272,7 +272,7 @@ docker compose up -d
 docker compose exec chemical-machines nvidia-smi
 
 # Access web interface
-open http://localhost:3000
+open http://localhost:5173
 ```
 
 #### Configuration

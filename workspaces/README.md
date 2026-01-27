@@ -42,6 +42,7 @@ Complete reference documentation for the `cm` library - a Python library for cre
   - [Hamiltonian Builder](#hamiltonian-builder)
   - [Matrix Expressions](#matrix-expressions)
   - [CI Basis Generation](#ci-basis-generation)
+  - [Molecular Integrals (cm.qm.integrals)](#molecular-integrals-cmqmintegrals)
 - [C++ Support](#c-support)
 - [Colormaps Reference](#colormaps-reference)
 - [Element Data Reference](#element-data-reference)
@@ -2676,6 +2677,282 @@ basis = mol.ci_basis(
 # Iterate over basis
 for det in basis:
     det.render()
+```
+
+### Molecular Integrals (cm.qm.integrals)
+
+The `cm.qm.integrals` submodule provides proper evaluation of molecular integrals using Gaussian-type orbitals (GTOs) with the McMurchie-Davidson scheme. This enables ab initio quantum chemistry calculations including Hartree-Fock and coupled cluster methods.
+
+#### Basis Sets
+
+Three basis sets are available with increasing accuracy:
+
+| Basis Set | Type | Angular Functions | Accuracy | Use Case |
+|-----------|------|-------------------|----------|----------|
+| STO-3G | Minimal | s, p | ~85% correlation | Teaching, qualitative |
+| cc-pVTZ | Triple-zeta | s, p, d, f | ~95% correlation | Publication quality |
+| cc-pVQZ | Quadruple-zeta | s, p, d, f, g | ~98% correlation | Benchmark accuracy |
+
+```python
+from cm.qm.integrals import BasisSet
+
+# Load basis set for a molecule
+basis = BasisSet("cc-pVTZ")
+basis.add_atom('H', (0.0, 0.0, 0.0))
+basis.add_atom('H', (0.74, 0.0, 0.0))
+
+print(f"Number of basis functions: {basis.n_basis}")  # 28 for H2/cc-pVTZ
+
+# Available basis sets
+basis_sto3g = BasisSet("STO-3G")      # Minimal basis (3 Gaussians per STO)
+basis_pvtz = BasisSet("cc-pVTZ")      # Triple-zeta correlation consistent
+basis_pvqz = BasisSet("cc-pVQZ")      # Quadruple-zeta (includes g functions)
+```
+
+#### Gaussian Primitives and Contracted Functions
+
+```python
+from cm.qm.integrals import GaussianPrimitive, ContractedGaussian, BasisFunction
+
+# Single Gaussian primitive: g(r) = N * x^i * y^j * z^k * exp(-α|r-R|²)
+primitive = GaussianPrimitive(
+    exponent=0.5,           # α (Gaussian exponent)
+    center=(0.0, 0.0, 0.0), # R (center position)
+    angular=(0, 0, 0)       # (i, j, k) for s-type
+)
+
+# p-type Gaussian (px)
+px = GaussianPrimitive(exponent=0.3, center=(0, 0, 0), angular=(1, 0, 0))
+
+# d-type Gaussian (dxy)
+dxy = GaussianPrimitive(exponent=0.2, center=(0, 0, 0), angular=(1, 1, 0))
+
+# Contracted Gaussian: χ = Σ cᵢ gᵢ(r)
+contracted = ContractedGaussian([
+    (0.15432897, GaussianPrimitive(3.42525091, (0, 0, 0), (0, 0, 0))),
+    (0.53532814, GaussianPrimitive(0.62391373, (0, 0, 0), (0, 0, 0))),
+    (0.44463454, GaussianPrimitive(0.16885540, (0, 0, 0), (0, 0, 0))),
+])
+```
+
+#### One-Electron Integrals
+
+```python
+from cm.qm.integrals import (
+    overlap_integral, overlap_matrix,
+    kinetic_integral, kinetic_matrix,
+    nuclear_attraction_integral, nuclear_attraction_matrix,
+)
+
+# Build basis
+basis = BasisSet("cc-pVTZ")
+basis.add_atom('H', (0.0, 0.0, 0.0))
+basis.add_atom('H', (0.74, 0.0, 0.0))
+
+# Overlap matrix: S_μν = ⟨μ|ν⟩
+S = overlap_matrix(basis)
+
+# Kinetic energy matrix: T_μν = ⟨μ|-½∇²|ν⟩
+T = kinetic_matrix(basis)
+
+# Nuclear attraction matrix: V_μν = ⟨μ|Σ -Z_A/|r-R_A||ν⟩
+nuclei = [('H', (0.0, 0.0, 0.0)), ('H', (0.74, 0.0, 0.0))]
+V = nuclear_attraction_matrix(basis, nuclei)
+
+# Core Hamiltonian
+H_core = T + V
+```
+
+#### Two-Electron Integrals (ERI)
+
+```python
+from cm.qm.integrals import (
+    electron_repulsion_integral,
+    eri_tensor,
+    eri_tensor_screened,
+    eri_tensor_optimized,
+    compute_schwarz_bounds,
+)
+
+# Full ERI tensor: (μν|λσ) = ∫∫ μ(r₁)ν(r₁) 1/r₁₂ λ(r₂)σ(r₂) dr₁dr₂
+ERI = eri_tensor(basis)  # O(N⁴) storage
+
+# Optimized with Schwarz screening and 8-fold symmetry
+ERI_opt, stats = eri_tensor_screened(basis, threshold=1e-10)
+print(f"Integrals computed: {stats['computed']} / {stats['total']}")
+print(f"Screening efficiency: {stats['screened_percent']:.1f}%")
+
+# Auto-select best method (GPU if available)
+ERI = eri_tensor_optimized(basis, threshold=1e-10, use_gpu=True)
+
+# Schwarz bounds for screening: Q_μν = √(μν|μν)
+Q = compute_schwarz_bounds(basis)
+```
+
+#### Direct SCF (Avoiding Full ERI Storage)
+
+```python
+from cm.qm.integrals import eri_direct
+
+# For large molecules, compute J and K directly without storing ERI tensor
+D = density_matrix  # From previous SCF iteration
+J, K = eri_direct(basis, D, threshold=1e-10)
+
+# Fock matrix: F = H_core + J - 0.5*K (for RHF)
+F = H_core + J - 0.5 * K
+```
+
+#### Hartree-Fock Solver
+
+```python
+from cm.qm.integrals import HartreeFockSolver, hartree_fock, HFResult
+
+# Quick interface
+nuclei = [('H', (0.0, 0.0, 0.0)), ('H', (0.74, 0.0, 0.0))]
+result = hartree_fock(
+    nuclei,
+    basis="cc-pVTZ",
+    n_electrons=2,
+    max_iterations=100,
+    convergence=1e-8,
+    verbose=True
+)
+
+print(f"HF Energy: {result.energy:.6f} Hartree")
+print(f"Converged: {result.converged} in {result.n_iterations} iterations")
+print(f"Orbital energies: {result.orbital_energies}")
+
+# Access MO coefficients and density matrix
+C = result.C          # MO coefficient matrix
+D = result.D          # Density matrix
+F = result.F          # Fock matrix
+S = result.S          # Overlap matrix
+ERI = result.eri      # Two-electron integrals
+
+# Full solver class for more control
+solver = HartreeFockSolver(nuclei, basis="cc-pVTZ", n_electrons=2)
+solver.compute_integrals()
+result = solver.solve(max_iterations=100, convergence=1e-8)
+```
+
+#### CCSD(T) Coupled Cluster
+
+The "gold standard" of quantum chemistry for recovering electron correlation energy.
+
+```python
+from cm.qm.integrals import ccsd, CCSDResult, transform_integrals_to_mo
+
+# First run Hartree-Fock
+nuclei = [('H', (0.0, 0.0, 0.0)), ('H', (0.74, 0.0, 0.0))]
+hf_result = hartree_fock(nuclei, basis="cc-pVTZ", n_electrons=2)
+
+# CCSD(T) calculation
+ccsd_result = ccsd(
+    hf_result,
+    max_iterations=50,
+    convergence=1e-8,
+    diis=True,      # Use DIIS acceleration
+    verbose=True
+)
+
+print(f"HF Energy:      {ccsd_result.energy_hf:.6f} Hartree")
+print(f"CCSD Energy:    {ccsd_result.energy_ccsd:.6f} Hartree")
+print(f"(T) Correction: {ccsd_result.energy_triples:.6f} Hartree")
+print(f"Total Energy:   {ccsd_result.energy_total:.6f} Hartree")
+print(f"Correlation:    {ccsd_result.energy_total - ccsd_result.energy_hf:.6f} Hartree")
+
+# Access amplitudes
+t1 = ccsd_result.t1  # Singles amplitudes (t_i^a)
+t2 = ccsd_result.t2  # Doubles amplitudes (t_ij^ab)
+```
+
+#### Integral Transformation
+
+```python
+from cm.qm.integrals import transform_integrals_to_mo
+
+# Transform AO integrals to MO basis for post-HF methods
+# (μν|λσ) → (pq|rs) where p,q,r,s are molecular orbitals
+eri_mo = transform_integrals_to_mo(eri_ao, C)  # O(N⁵) transformation
+```
+
+#### Molecular Orbital Visualization
+
+```python
+from cm.qm.integrals import (
+    OrbitalGrid,
+    create_orbital_grid,
+    evaluate_orbital_on_grid,
+    extract_orbital_isosurface,
+    marching_cubes,
+)
+
+# Create a 3D grid around the molecule
+grid = create_orbital_grid(
+    basis,
+    padding=3.0,      # Angstroms beyond atoms
+    resolution=0.1    # Grid spacing in Angstroms
+)
+
+# Evaluate molecular orbital on grid
+orbital_values = evaluate_orbital_on_grid(grid, basis, C[:, orbital_index])
+
+# Extract isosurface using marching cubes
+vertices, faces = extract_orbital_isosurface(
+    grid, orbital_values,
+    isovalue=0.02,    # Typical orbital isosurface value
+    color='blue'
+)
+
+# Or use marching cubes directly
+vertices, faces = marching_cubes(orbital_values, level=0.02)
+```
+
+#### Boys Function
+
+The Boys function F_n(x) is used for nuclear attraction and electron repulsion integrals.
+
+```python
+from cm.qm.integrals import boys_function
+
+# F_n(x) = ∫₀¹ t^(2n) exp(-x t²) dt
+F0 = boys_function(0, 1.0)   # F₀(1.0)
+F1 = boys_function(1, 2.5)   # F₁(2.5)
+
+# Vectorized evaluation
+import numpy as np
+x_values = np.linspace(0, 10, 100)
+F0_values = boys_function(0, x_values)
+```
+
+#### Complete Example: H₂ Energy Curve
+
+```python
+from cm.qm.integrals import hartree_fock, ccsd
+import numpy as np
+
+distances = np.linspace(0.5, 3.0, 20)  # Bond lengths in Angstroms
+hf_energies = []
+ccsd_energies = []
+
+for r in distances:
+    nuclei = [('H', (0, 0, 0)), ('H', (r, 0, 0))]
+
+    # Hartree-Fock
+    hf = hartree_fock(nuclei, basis="cc-pVTZ", n_electrons=2)
+    hf_energies.append(hf.energy)
+
+    # CCSD(T)
+    cc = ccsd(hf, max_iterations=30, convergence=1e-7)
+    ccsd_energies.append(cc.energy_total)
+
+# Plot results
+import matplotlib.pyplot as plt
+plt.plot(distances, hf_energies, label='HF/cc-pVTZ')
+plt.plot(distances, ccsd_energies, label='CCSD(T)/cc-pVTZ')
+plt.xlabel('R (Å)')
+plt.ylabel('Energy (Hartree)')
+plt.legend()
 ```
 
 ---

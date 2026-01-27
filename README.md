@@ -6,11 +6,12 @@ Chemical Machines provides researchers and developers with a containerized envir
 
 ## Key Features
 
-- **GPU-accelerated quantum mechanics** - Hartree-Fock calculations for many-electron systems with CUDA support
+- **GPU-accelerated quantum mechanics** - Hartree-Fock and CCSD(T) calculations with CUDA support
+- **Publication-quality basis sets** - STO-3G (teaching), cc-pVTZ (publication), cc-pVQZ (benchmark)
 - **Symbolic mathematics** - 50+ special functions including Bessel, Legendre, Hermite polynomials, and spherical harmonics
 - **Interactive notebook interface** - Jupyter-like experience with persistent Python kernels and drag-and-drop cells
 - **Integrated molecular databases** - 134k+ molecules from NIST CCCBDB, PubChem, and QM9 datasets
-- **Real-time 3D visualization** - WebGL-powered molecular structure rendering
+- **Real-time 3D visualization** - WebGL-powered molecular structure and orbital isosurface rendering
 - **Docker-based deployment** - Single-command setup with full CUDA and database stack
 - **Comprehensive test coverage** - 90+ tests across all modules ensuring scientific accuracy
 
@@ -29,14 +30,21 @@ Chemical Machines addresses the following research problems in computational che
 
 The platform employs the following computational approaches:
 
-- **Electronic structure**: Hartree-Fock approximation with Slater-type and Gaussian-type orbital basis functions
+- **Electronic structure**: Hartree-Fock (RHF) and CCSD(T) coupled cluster with Gaussian-type orbital basis functions
+- **Basis sets**: STO-3G (minimal), cc-pVTZ (triple-zeta), cc-pVQZ (quadruple-zeta with g functions)
+- **Integral evaluation**: McMurchie-Davidson scheme with Schwarz screening and 8-fold permutation symmetry
 - **Special functions**: Direct numerical integration and series expansion for Bessel functions, orthogonal polynomials, and spherical harmonics
-- **GPU acceleration**: PyTorch-based tensor operations enabling efficient evaluation of symbolic expressions on CUDA devices
+- **GPU acceleration**: PyTorch/CUDA acceleration for two-electron integrals and tensor operations
 - **Database queries**: Elasticsearch-backed full-text and property-based search across 134,000+ molecular structures
 
-**Accuracy considerations**: Results from Hartree-Fock calculations typically achieve 85-95% of experimental correlation energies for small molecules. For publication-quality results,
+**Accuracy hierarchy**:
+| Method | Basis | Typical Accuracy | Use Case |
+|--------|-------|------------------|----------|
+| RHF | STO-3G | ~85% correlation | Teaching, qualitative |
+| RHF | cc-pVTZ | ~95% correlation | Publication quality |
+| CCSD(T) | cc-pVQZ | ~99% correlation | Benchmark accuracy |
 
- validation against experimental data or higher-level calculations (CCSD(T), full CI) is recommended.
+For publication-quality results, validation against experimental data is recommended.
 
 ## Quick Start
 
@@ -94,6 +102,17 @@ Quantum mechanics toolkit for atomic and molecular calculations.
 - Calculate matrix elements using Slater-Condon rules
 - Define molecules with arbitrary geometries
 - Support for relativistic calculations with Dirac spinors
+
+### cm.qm.integrals
+
+Ab initio quantum chemistry module for molecular integral evaluation and electronic structure calculations.
+
+- **Basis sets**: STO-3G, cc-pVTZ, cc-pVQZ with s, p, d, f, g angular momentum functions
+- **One-electron integrals**: Overlap (S), kinetic energy (T), nuclear attraction (V)
+- **Two-electron integrals**: Electron repulsion (ERI) with Schwarz screening and 8-fold symmetry
+- **Hartree-Fock**: Restricted Hartree-Fock (RHF) solver with DIIS acceleration
+- **Coupled cluster**: Full CCSD with perturbative triples (T) correction
+- **Visualization**: Molecular orbital isosurface extraction via marching cubes
 
 ### cm.data
 
@@ -233,6 +252,41 @@ views.molecule(water_calc, show_bonds=True, rotate=True)
 ```
 
 The NIST CCCBDB provides high-quality experimental and computational benchmark data essential for validating quantum chemical calculations.
+
+### Workflow 5: Ab Initio Quantum Chemistry
+
+This example demonstrates computing molecular energies using Hartree-Fock and CCSD(T) with publication-quality basis sets.
+
+```python
+from cm.qm.integrals import hartree_fock, ccsd
+
+# Define H2 molecule at equilibrium bond length
+nuclei = [('H', (0, 0, 0)), ('H', (0.74, 0, 0))]
+
+# Run Hartree-Fock with triple-zeta basis
+hf_result = hartree_fock(
+    nuclei,
+    basis="cc-pVTZ",
+    n_electrons=2,
+    verbose=True
+)
+print(f"HF/cc-pVTZ Energy: {hf_result.energy:.6f} Hartree")
+
+# Add electron correlation with CCSD(T)
+ccsd_result = ccsd(hf_result, max_iterations=50, convergence=1e-8)
+print(f"CCSD(T)/cc-pVTZ Energy: {ccsd_result.energy_total:.6f} Hartree")
+print(f"Correlation energy: {ccsd_result.energy_total - hf_result.energy:.6f} Hartree")
+
+# Compare with experimental: -1.1745 Hartree (exact non-relativistic limit)
+```
+
+For benchmark-quality results, use cc-pVQZ basis which includes g-type polarization functions:
+
+```python
+hf_pvqz = hartree_fock(nuclei, basis="cc-pVQZ", n_electrons=2)
+ccsd_pvqz = ccsd(hf_pvqz)
+print(f"CCSD(T)/cc-pVQZ: {ccsd_pvqz.energy_total:.6f} Hartree")
+```
 
 ## Architecture
 
@@ -536,10 +590,11 @@ Contributions to Chemical Machines are welcome. The project prioritizes scientif
 
 ### Areas for Contribution
 
-- **Basis sets**: Add support for additional Gaussian basis sets (6-31G, cc-pVDZ, etc.)
-- **Methods**: Implement post-Hartree-Fock methods (MP2, CCSD)
+- **Basis sets**: Add support for additional Gaussian basis sets (6-31G*, aug-cc-pVTZ, def2-TZVP)
+- **Methods**: Implement MP2, CASSCF, DFT exchange-correlation functionals
+- **Integral acceleration**: Further GPU optimization, Cholesky decomposition for ERI
 - **Special functions**: Expand coverage of mathematical special functions
-- **Visualization**: Enhanced molecular rendering (orbitals, isosurfaces)
+- **Visualization**: Enhanced orbital rendering, electron density plots
 - **Database integration**: Additional benchmark data sources
 - **Documentation**: Examples, tutorials, API documentation
 

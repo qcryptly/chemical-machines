@@ -43,6 +43,63 @@ app.use(express.static(path.join(__dirname, '../client/dist')));
 
 // API Routes
 
+// ================== Health Check ==================
+
+// Check health of all backend services
+app.get('/api/health', async (req, res) => {
+  const services = {
+    database: { status: 'checking', message: null },
+    compute: { status: 'checking', message: null },
+    elasticsearch: { status: 'checking', message: null }
+  };
+
+  // Check PostgreSQL
+  try {
+    await pgPool.query('SELECT 1');
+    services.database.status = 'healthy';
+  } catch (error) {
+    services.database.status = 'unhealthy';
+    services.database.message = error.message;
+  }
+
+  // Check cm-compute
+  try {
+    const response = await axios.get(`${COMPUTE_URL}/environments`, { timeout: 3000 });
+    if (response.status === 200) {
+      services.compute.status = 'healthy';
+    } else {
+      services.compute.status = 'unhealthy';
+      services.compute.message = `Unexpected status: ${response.status}`;
+    }
+  } catch (error) {
+    services.compute.status = 'unhealthy';
+    services.compute.message = error.code === 'ECONNREFUSED'
+      ? 'Compute service not running'
+      : error.message;
+  }
+
+  // Check Elasticsearch
+  try {
+    await esClient.ping();
+    services.elasticsearch.status = 'healthy';
+  } catch (error) {
+    services.elasticsearch.status = 'unhealthy';
+    services.elasticsearch.message = error.message;
+  }
+
+  // Overall status - healthy only if all services are healthy
+  const allHealthy = Object.values(services).every(s => s.status === 'healthy');
+  const anyHealthy = Object.values(services).some(s => s.status === 'healthy');
+
+  const overallStatus = allHealthy ? 'healthy' : (anyHealthy ? 'degraded' : 'unhealthy');
+
+  res.status(allHealthy ? 200 : 503).json({
+    status: overallStatus,
+    services,
+    timestamp: new Date().toISOString()
+  });
+});
+
 // ================== Workspaces (replaces Notebooks) ==================
 
 // Helper to count files in workspace directory

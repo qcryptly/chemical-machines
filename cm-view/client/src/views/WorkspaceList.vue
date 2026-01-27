@@ -4,8 +4,17 @@
       <h2>Workspaces</h2>
     </div>
 
-    <!-- Loading State -->
-    <div v-if="isLoading" class="loading-container">
+    <!-- Service Status (shown when services not healthy) -->
+    <ServiceStatus
+      v-if="!servicesReady"
+      :show-details="true"
+      :auto-retry="true"
+      :retry-interval="5000"
+      @healthy="onServicesHealthy"
+    />
+
+    <!-- Loading State (only after services are ready) -->
+    <div v-else-if="isLoading" class="loading-container">
       <div class="loading-spinner"></div>
       <p class="loading-text">Loading workspaces...</p>
     </div>
@@ -110,6 +119,7 @@
 import { ref, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
+import ServiceStatus from '../components/ServiceStatus.vue'
 
 const router = useRouter()
 const workspaces = ref([])
@@ -122,6 +132,7 @@ const nameInput = ref(null)
 const isLoading = ref(true)
 const loadError = ref(null)
 const deletingId = ref(null)
+const servicesReady = ref(false)
 
 async function loadTemplates() {
   try {
@@ -237,9 +248,25 @@ function formatRelativeDate(dateStr) {
   return date.toLocaleDateString()
 }
 
-onMounted(() => {
+function onServicesHealthy() {
+  servicesReady.value = true
   loadWorkspaces()
   loadTemplates()
+}
+
+onMounted(async () => {
+  // First check if services are already healthy
+  try {
+    const response = await axios.get('/api/health', { timeout: 5000 })
+    if (response.data.status === 'healthy') {
+      servicesReady.value = true
+      loadWorkspaces()
+      loadTemplates()
+    }
+    // If not healthy, ServiceStatus component will handle retry
+  } catch {
+    // Services not ready, ServiceStatus component will handle
+  }
 })
 </script>
 

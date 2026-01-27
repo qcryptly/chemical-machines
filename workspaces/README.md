@@ -1407,115 +1407,61 @@ m.render()
 - `bra_label`: (braket only) Label for the bra side (default: "ψ")
 - `var`: (subscript only) Variable name for elements (default: "a")
 
-#### Slater Determinants
+#### Slater Determinants (Symbolic Rendering)
 
-For quantum chemistry, render Slater determinants in standard notation:
+For symbolic Slater determinant notation in cm.symbols, see the [Quantum Mechanics section](#slater-determinants) which uses `qm.slater()` to create actual Slater determinants with spin-orbitals that can compute overlaps and matrix elements.
 
-```python
-from cm.symbols import Math
-
-# Standard Slater determinant with orbital wavefunctions
-m = Math()
-m.slater_determinant(['\\phi_1', '\\phi_2', '\\phi_3'])
-m.render()
-# Renders: (1/√3!) |φ₁(r₁) φ₂(r₁) φ₃(r₁)|
-#                  |φ₁(r₂) φ₂(r₂) φ₃(r₂)|
-#                  |φ₁(r₃) φ₂(r₃) φ₃(r₃)|
-
-# Without normalization factor
-m = Math()
-m.slater_determinant(['1s', '2s'], normalize=False)
-m.render()
-
-# Occupation number (ket) notation
-m = Math()
-m.slater_ket(['1s↑', '1s↓', '2s↑'])
-m.render()
-# Renders: (1/√3!) |1s↑, 1s↓, 2s↑⟩
-```
-
-#### Determinant Inner Products
-
-Compute inner products of symbolic determinants with support for orthogonality conditions. When orthogonality is specified, non-matching state overlaps evaluate to zero (Kronecker delta: ⟨φᵢ|φⱼ⟩ = δᵢⱼ).
+**Note:** The `cm.symbols.Math` class focuses on symbolic mathematical expressions and special functions. For quantum mechanical Slater determinants with proper antisymmetry and overlap calculations, use the `cm.qm` module:
 
 ```python
-from cm.symbols import Math
-import numpy as np
+from cm import qm
 
-# Two 2x2 determinants with same elements
-bra = np.array([['a', 'b'], ['c', 'd']])
-ket = np.array([['a', 'b'], ['c', 'd']])
+# Create spin-orbitals for helium ground state
+orbitals = qm.basis_orbitals([
+    (1, 0, 0, 1),   # 1s up: (n, l, m, spin)
+    (1, 0, 0, -1),  # 1s down
+])
 
-# Inner product without orthogonality (shows all terms)
-m = Math()
-m.determinant_inner_product(bra, ket, orthogonal=False)
-m.render()
-# Shows: (⟨a|a⟩ ⟨d|d⟩) - (⟨a|b⟩ ⟨d|c⟩) - (⟨b|a⟩ ⟨c|d⟩) + (⟨b|b⟩ ⟨c|c⟩)
+# Create Slater determinant
+psi = qm.slater(orbitals)
+psi.render()  # Renders: |1s↑, 1s↓⟩
 
-# Inner product WITH orthogonality (zeros out non-matching terms)
-m = Math()
-m.determinant_inner_product(bra, ket, orthogonal=True)
-m.render()
-# Only terms where all bra elements match ket elements survive
-
-# Simplified inner product (shows final result after orthogonality)
-m = Math()
-m.determinant_inner_product_simplified(bra, ket, orthogonal=True)
-m.render()
-# Shows: 2 (the count of surviving terms)
-
-# Different determinants with orthogonality - evaluates to 0
-bra2 = np.array([['a', 'b'], ['c', 'd']])
-ket2 = np.array([['e', 'f'], ['g', 'h']])
-m = Math()
-m.determinant_inner_product(bra2, ket2, orthogonal=True)
-m.render()
-# Shows: 0 (no matching terms when states are orthogonal)
-
-# Partial orthogonality - specify which states are orthogonal
-m = Math()
-m.determinant_inner_product(bra, ket, orthogonal=True,
-                            orthogonal_states=['a', 'b', 'c', 'd'])
-m.render()
+# Or from an atom directly
+C = qm.atom('C')
+psi_carbon = C.slater_determinant()
+psi_carbon.render()  # Renders determinant for 1s² 2s² 2p²
 ```
 
-**Slater Determinant Inner Products:**
+#### Slater Determinant Overlaps
 
-For Slater determinants with orthonormal orbitals:
+Compute overlaps between Slater determinants using the `@` operator:
 
 ```python
-from cm.symbols import Math
+from cm import qm
 
-# Same orbitals - inner product is 1
-m = Math()
-m.slater_inner_product(['a', 'b', 'c'], ['a', 'b', 'c'], orthogonal=True)
-m.render()
-# Shows: (1/n!) 1
+# Create two determinants with same orbitals
+orbitals = qm.basis_orbitals([
+    (1, 0, 0, 1),   # 1s up
+    (1, 0, 0, -1),  # 1s down
+])
+psi = qm.slater(orbitals)
+phi = qm.slater(orbitals)
 
-# Different orbitals - inner product is 0
-m = Math()
-m.slater_inner_product(['a', 'b', 'c'], ['a', 'b', 'd'], orthogonal=True)
-m.render()
-# Shows: (1/n!) 0
+# Same orbitals - overlap is 1
+overlap = psi @ phi
+print(overlap.value)  # 1
 
-# Show full expansion without orthogonality
-m = Math()
-m.slater_inner_product(['a', 'b'], ['c', 'd'], orthogonal=False)
-m.render()
-# Shows: (1/n!) Σ_P (-1)^P ⟨a|c⟩ ⟨b|d⟩
-
-# Show full overlap expansion of two determinants
-m = Math()
-m.determinant_overlap_expansion(bra, ket)
-m.render()
-# Shows: (⟨a,d| - ⟨b,c|)(|a,d⟩ - |b,c⟩)
+# Different orbitals - overlap is 0 (orthogonal)
+orbitals2 = qm.basis_orbitals([
+    (2, 0, 0, 1),   # 2s up
+    (2, 0, 0, -1),  # 2s down
+])
+chi = qm.slater(orbitals2)
+overlap2 = psi @ chi
+print(overlap2.value)  # 0
 ```
 
-**Parameters for inner product methods:**
-- `bra_matrix`, `ket_matrix`: 2D array-like matrices for bra and ket determinants
-- `orthogonal`: If True, apply orthonormality (⟨i|j⟩ = δᵢⱼ)
-- `orthogonal_states`: Optional list of specific states that are mutually orthogonal
-- `normalize`: (Slater only) Include normalization factor 1/n!
+See the [Quantum Mechanics section](#slater-determinants) for more details on Slater determinants, matrix elements, and Slater-Condon rules
 
 #### Building and Clearing
 
@@ -2172,46 +2118,49 @@ stretched = mol.with_geometry([('H', 0, 0, 0), ('H', 1.0, 0, 0)])
 
 ### Spin-Orbitals
 
-Create spin-orbital basis elements using spherical harmonic quantum numbers.
+Create spin-orbital basis elements using quantum numbers.
 
-#### `qm.basis_sh_element(spin, L, m, n=None)`
+#### `qm.basis_orbital(spec, vec3=None, t=None)`
 
-Create a single spin-orbital.
+Create a single spin-orbital from a tuple specification.
 
 **Parameters:**
-- `spin`: +1 for spin-up (α), -1 for spin-down (β)
-- `L`: Angular momentum quantum number (0=s, 1=p, 2=d, 3=f, ...)
-- `m`: Magnetic quantum number (-L ≤ m ≤ L)
-- `n`: Optional principal quantum number
+- `spec`: Tuple of `(n, l, m, spin)` or `(l, m, spin)` where:
+  - `n`: Principal quantum number (optional)
+  - `l`: Angular momentum quantum number (0=s, 1=p, 2=d, 3=f, ...)
+  - `m`: Magnetic quantum number (-l ≤ m ≤ l)
+  - `spin`: +1 for spin-up (α), -1 for spin-down (β)
+- `vec3`: Optional coordinate (defaults to spherical coordinates)
+- `t`: Optional time parameter
 
 ```python
 from cm import qm
 
-# 1s spin-up orbital
-orbital_1s_up = qm.basis_sh_element(spin=1, L=0, m=0, n=1)
+# 1s spin-up orbital: (n, l, m, spin)
+orbital_1s_up = qm.basis_orbital((1, 0, 0, 1))
 
 # 2p spin-down with m=-1
-orbital_2p_down = qm.basis_sh_element(spin=-1, L=1, m=-1, n=2)
+orbital_2p_down = qm.basis_orbital((2, 1, -1, -1))
 ```
 
-#### `qm.basis_sh(quantum_numbers)`
+#### `qm.basis_orbitals(specs, vec3=None, t=None)`
 
-Create multiple spin-orbitals from a list of tuples.
+Create multiple spin-orbitals from a list of tuple specifications.
 
 **Parameters:**
-- `quantum_numbers`: List of tuples `(spin, L, m)` or `(spin, L, m, n)`
+- `specs`: List of tuples `(n, l, m, spin)` or `(l, m, spin)`
 
 ```python
 from cm import qm
 
 # Helium ground state: 1s↑ 1s↓
-orbitals = qm.basis_sh([(1, 0, 0, 1), (-1, 0, 0, 1)])
+orbitals = qm.basis_orbitals([(1, 0, 0, 1), (1, 0, 0, -1)])
 
 # Lithium: 1s↑ 1s↓ 2s↑
-orbitals = qm.basis_sh([
+orbitals = qm.basis_orbitals([
     (1, 0, 0, 1),   # 1s↑
-    (-1, 0, 0, 1),  # 1s↓
-    (1, 0, 0, 2)    # 2s↑
+    (1, 0, 0, -1),  # 1s↓
+    (2, 0, 0, 1)    # 2s↑
 ])
 ```
 
@@ -2224,13 +2173,15 @@ Create a Slater determinant from a list of spin-orbitals.
 ```python
 from cm import qm
 
-# Create orbitals
-orbital_1sA_up = qm.basis_sh_element(spin=1, L=0, m=0, n=1)
-orbital_1sA_down = qm.basis_sh_element(spin=-1, L=0, m=0, n=1)
+# Create orbitals using basis_orbitals
+orbitals = qm.basis_orbitals([
+    (1, 0, 0, 1),   # 1s↑
+    (1, 0, 0, -1),  # 1s↓
+])
 
 # Create Slater determinant
-psi = qm.slater([orbital_1sA_up, orbital_1sA_down])
-psi.render()  # Renders: |1, 0, 0, ↑, 1, 0, 0, ↓⟩
+psi = qm.slater(orbitals)
+psi.render()  # Renders: |1s↑, 1s↓⟩
 ```
 
 The Slater determinant automatically handles:
@@ -2246,13 +2197,15 @@ Use the `@` operator to compute overlaps ⟨ψ|φ⟩ between Slater determinants
 from cm import qm
 
 # Same orbitals - overlap is 1
-psi = qm.slater(qm.basis_sh([(1, 0, 0), (-1, 0, 0)]))
-phi = qm.slater(qm.basis_sh([(1, 0, 0), (-1, 0, 0)]))
+orbitals1 = qm.basis_orbitals([(1, 0, 0, 1), (1, 0, 0, -1)])
+psi = qm.slater(orbitals1)
+phi = qm.slater(orbitals1)
 overlap = psi @ phi
 print(overlap.value)  # 1
 
 # Different orbitals - overlap is 0 (orthogonal)
-chi = qm.slater(qm.basis_sh([(1, 0, 0), (1, 1, 0)]))
+orbitals2 = qm.basis_orbitals([(2, 0, 0, 1), (2, 0, 0, -1)])
+chi = qm.slater(orbitals2)
 overlap = psi @ chi
 print(overlap.value)  # 0
 
@@ -2281,9 +2234,9 @@ H = qm.hamiltonian()
 ```python
 from cm import qm
 
-# Create determinants
-orbitals_A = qm.basis_sh([(1, 0, 0, 1), (-1, 0, 0, 1)])
-orbitals_B = qm.basis_sh([(1, 0, 0, 2), (-1, 0, 0, 2)])
+# Create determinants using basis_orbitals: (n, l, m, spin)
+orbitals_A = qm.basis_orbitals([(1, 0, 0, 1), (1, 0, 0, -1)])  # 1s↑, 1s↓
+orbitals_B = qm.basis_orbitals([(2, 0, 0, 1), (2, 0, 0, -1)])  # 2s↑, 2s↓
 psi = qm.slater(orbitals_A)
 phi = qm.slater(orbitals_B)
 
@@ -2308,11 +2261,12 @@ Matrix elements are automatically simplified using Slater-Condon rules based on 
 ```python
 from cm import qm
 
-# Define orbitals for H₂ molecule
-orbital_1sA_up = qm.basis_sh_element(spin=1, L=0, m=0, n=1)
-orbital_1sA_down = qm.basis_sh_element(spin=-1, L=0, m=0, n=1)
-orbital_1sB_up = qm.basis_sh_element(spin=1, L=0, m=0, n=2)
-orbital_1sB_down = qm.basis_sh_element(spin=-1, L=0, m=0, n=2)
+# Define orbitals for H₂ molecule using basis_orbital: (n, l, m, spin)
+# n=1 for atom A, n=2 for atom B (using n as atom index)
+orbital_1sA_up = qm.basis_orbital((1, 0, 0, 1))    # atom A, 1s↑
+orbital_1sA_down = qm.basis_orbital((1, 0, 0, -1)) # atom A, 1s↓
+orbital_1sB_up = qm.basis_orbital((2, 0, 0, 1))    # atom B, 1s↑
+orbital_1sB_down = qm.basis_orbital((2, 0, 0, -1)) # atom B, 1s↓
 
 # Ionic configurations
 ionic_A = qm.slater([orbital_1sA_up, orbital_1sA_down])
@@ -2354,10 +2308,11 @@ from cm.views import html
 html("<h2>H₂ Molecule - Slater Determinant Basis</h2>")
 
 # Define atomic orbitals: 1s on atom A (n=1) and atom B (n=2)
-orbital_1sA_up = qm.basis_sh_element(spin=1, L=0, m=0, n=1)
-orbital_1sA_down = qm.basis_sh_element(spin=-1, L=0, m=0, n=1)
-orbital_1sB_up = qm.basis_sh_element(spin=1, L=0, m=0, n=2)
-orbital_1sB_down = qm.basis_sh_element(spin=-1, L=0, m=0, n=2)
+# Using basis_orbital with (n, l, m, spin) - n serves as atom index
+orbital_1sA_up = qm.basis_orbital((1, 0, 0, 1))    # atom A, 1s↑
+orbital_1sA_down = qm.basis_orbital((1, 0, 0, -1)) # atom A, 1s↓
+orbital_1sB_up = qm.basis_orbital((2, 0, 0, 1))    # atom B, 1s↑
+orbital_1sB_down = qm.basis_orbital((2, 0, 0, -1)) # atom B, 1s↓
 
 # Ionic configurations (both electrons on one atom)
 html("<h3>Ionic Configurations</h3>")

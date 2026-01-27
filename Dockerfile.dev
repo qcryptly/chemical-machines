@@ -72,13 +72,21 @@ RUN mkdir -p /var/lib/postgresql/data \
     && echo "host all all 0.0.0.0/0 md5" >> /var/lib/postgresql/data/pg_hba.conf \
     && echo "listen_addresses='*'" >> /var/lib/postgresql/data/postgresql.conf
 
+# Install all Python packages in base environment
+# Scientific computing
+RUN pip install --no-cache-dir \
+    numpy scipy pandas scikit-learn \
+    sympy matplotlib pillow \
+    jedi \
+    biopython rdkit openmm mdanalysis \
+    psycopg2-binary elasticsearch \
+    pybind11
+# PyTorch installed at runtime via init-base-env.sh for CUDA detection
+
+# Accept conda channels for PyTorch (used by init-base-env.sh)
 RUN conda tos accept --override-channels --channel https://conda.anaconda.org/pytorch \
     && conda tos accept --override-channels --channel https://conda.anaconda.org/nvidia \
     && conda tos accept --override-channels --channel default
-
-# Note: The 'torch' conda environment is initialized on first startup via
-# docker/init-torch-env.sh which detects CUDA version at runtime.
-# This allows the same image to work with different CUDA versions.
 
 # Create application user
 RUN useradd -m -s /bin/bash cmuser

@@ -92,6 +92,21 @@ from .hamiltonian import (
     HamiltonianMatrix,
 )
 
+# Integral evaluation and Hartree-Fock
+from .integrals import (
+    BasisSet,
+    GaussianPrimitive,
+    ContractedGaussian,
+    BasisFunction,
+    HartreeFockSolver,
+    HFResult,
+    hartree_fock,
+    overlap_matrix,
+    kinetic_matrix,
+    nuclear_attraction_matrix,
+    eri_tensor,
+)
+
 # Orthogonality utilities
 from .orthogonality import (
     spherical_harmonic_orthogonality,
@@ -151,4 +166,17 @@ __all__ = [
     'HamiltonianMatrix',
     # Orthogonality utilities
     'spherical_harmonic_orthogonality',
+    # Integral evaluation
+    'BasisSet',
+    'GaussianPrimitive',
+    'ContractedGaussian',
+    'BasisFunction',
+    'overlap_matrix',
+    'kinetic_matrix',
+    'nuclear_attraction_matrix',
+    'eri_tensor',
+    # Hartree-Fock
+    'HartreeFockSolver',
+    'HFResult',
+    'hartree_fock',
 ]

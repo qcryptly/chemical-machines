@@ -81,7 +81,7 @@
                   {{ env.packageCount }} packages
                 </span>
                 <button
-                  v-if="!env.isBase && env.name !== 'torch'"
+                  v-if="!env.isBase && env.name !== 'base'"
                   @click.stop="deleteEnvironment(env.name)"
                   class="delete-env-btn"
                   title="Delete environment"
@@ -589,7 +589,7 @@ async function refreshWebGL() {
 
 // Environment state (Python/Conda)
 const environments = ref([])
-const selectedEnvironment = ref('torch')
+const selectedEnvironment = ref('base')
 const pythonVersions = ref(['3.12', '3.11', '3.10', '3.9', '3.8'])
 
 // C++ Environment state
@@ -1007,7 +1007,7 @@ async function deleteEnvironment(name) {
     await axios.delete(`/api/environments/${name}`)
     await loadEnvironments()
     if (selectedEnvironment.value === name) {
-      selectedEnvironment.value = 'torch'
+      selectedEnvironment.value = 'base'
     }
   } catch (error) {
     console.error('Error deleting environment:', error)
@@ -1449,6 +1449,48 @@ async function executeCell(index) {
   cell.status = 'running'
   cell.output = ''
 
+  // Check if services are healthy before executing
+  // Retry up to 12 times (60 seconds) while services are starting
+  let servicesReady = false
+  let retryCount = 0
+  const maxRetries = 12
+  const retryDelay = 5000
+
+  while (!servicesReady && retryCount < maxRetries) {
+    try {
+      const healthResponse = await axios.get('/api/health', { timeout: 5000 })
+      if (healthResponse.data.status === 'healthy') {
+        servicesReady = true
+      } else {
+        // Services not ready yet - show waiting message
+        const unhealthyServices = Object.entries(healthResponse.data.services || {})
+          .filter(([, s]) => s.status !== 'healthy')
+          .map(([name]) => name)
+        cell.output = `Waiting for services to start...\nServices starting: ${unhealthyServices.join(', ')}`
+        retryCount++
+        if (retryCount < maxRetries) {
+          await new Promise(resolve => setTimeout(resolve, retryDelay))
+        }
+      }
+    } catch (error) {
+      // Health check failed - services likely not running
+      cell.output = `Waiting for services to start...\nConnecting to compute service...`
+      retryCount++
+      if (retryCount < maxRetries) {
+        await new Promise(resolve => setTimeout(resolve, retryDelay))
+      }
+    }
+  }
+
+  if (!servicesReady) {
+    cell.output = 'Services unavailable. Please wait for services to start and try again.'
+    cell.status = 'error'
+    return
+  }
+
+  // Clear the waiting message before execution
+  cell.output = ''
+
   // Auto-save before execution
   if (hasUnsavedChanges.value) {
     try {
@@ -1594,7 +1636,14 @@ async function executeCell(index) {
     }
 
   } catch (error) {
-    cell.output = `Error: ${error.message}`
+    // Check if this is a connection error to the compute service
+    if (error.code === 'ECONNREFUSED' || error.message?.includes('ECONNREFUSED') ||
+        error.code === 'ECONNRESET' || error.message?.includes('ECONNRESET') ||
+        error.response?.status === 503 || error.response?.status === 500) {
+      cell.output = 'Compute service is not available. Services may still be starting - please try again in a moment.'
+    } else {
+      cell.output = `Error: ${error.message}`
+    }
     cell.status = 'error'
   }
 }

@@ -131,8 +131,8 @@ async function executeJob(job) {
   // Get the handler function for this job type
   const handler = getJobHandler(type);
 
-  // Determine Python environment
-  const environment = params?.environment || 'torch';
+  // Determine Python environment (default to base)
+  const environment = params?.environment || 'base';
   const pythonPath = getPythonPath(environment);
 
   // Create context for the handler

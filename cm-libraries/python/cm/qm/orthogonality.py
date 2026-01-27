@@ -46,6 +46,7 @@ def spherical_harmonic_orthogonality(
 
     def integrand(phi, theta):
         """Orthogonality integrand: Y_l^m* Y_l'^m' sin(theta)."""
+        # sph_harm_y takes (l, m, theta, phi)
         Y1 = sph_harm_y(l, m, theta, phi)
         Y2 = sph_harm_y(l_p, m_p, theta, phi)
         # Include sin(theta) from spherical integration measure

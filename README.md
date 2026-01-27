@@ -122,14 +122,14 @@ Visualization and output formatting for interactive research.
 This example demonstrates computing the ground-state energy of a carbon atom using the Hartree-Fock approximation.
 
 ```python
-from cm.qm import atom, HamiltonianBuilder
+from cm import qm
 
 # Create carbon atom with automatic electron configuration
-C = atom('C')  # Automatically configures 1s² 2s² 2p²
+C = qm.atom('C')  # Automatically configures 1s² 2s² 2p²
 print(C.configuration.label)  # Output: "1s² 2s² 2p²"
 
 # Build electronic Hamiltonian with all relevant terms
-H = HamiltonianBuilder.electronic().build()
+H = qm.HamiltonianBuilder.electronic().build()
 
 # Calculate ground state energy
 E = C.energy(H).numerical()
@@ -144,7 +144,7 @@ The Hartree-Fock energy is typically 85-95% of the exact correlation energy. The
 This example shows symbolic manipulation of spherical harmonics, commonly used in quantum mechanics for angular momentum eigenstates.
 
 ```python
-from cm.symbols import Math
+from cm import Math
 
 # Create symbolic expression with spherical harmonics
 theta, phi = Math.var("theta"), Math.var("phi")
@@ -157,29 +157,56 @@ Y_21.render()  # Displays beautiful MathJax-rendered equation
 result = Y_21.evaluate(theta=1.57, phi=0.785)
 print(f"Y₂¹(π/2, π/4) = {result}")
 
-# Verify orthogonality by integration
-Y_20 = Math.Ylm(2, 0, theta, phi)  # Different m quantum number
-
-# Integrate Y₂¹* × Y₂⁰ over full solid angle
-overlap = (Y_21.conjugate() * Y_20).integrate(
-    theta, bounds=[0, Math.pi()]
-).integrate(
-    phi, bounds=[0, 2*Math.pi()]
-)
-
-print(f"Orthogonality check: {overlap.evaluate():.6f}")  # Should be ≈ 0
+# Verify orthogonality using numerical integration
+from cm.qm import spherical_harmonic_orthogonality
+overlap = spherical_harmonic_orthogonality(2, 1, 2, 0)  # Different m quantum number
+print(f"Orthogonality check: {overlap:.6f}")  # Should be ≈ 0
 ```
 
 Spherical harmonics form an orthonormal basis on the unit sphere, essential for expanding angular wavefunctions in atomic and molecular systems.
 
-### Workflow 3: Benchmark Data and Visualization
+### Workflow 3: Molecular Hamiltonian and CI Matrix
+
+This example demonstrates building a molecular Hamiltonian, generating a CI basis, and diagonalizing to find ground state energy.
+
+```python
+from cm import qm
+
+# Create H2 molecule at experimental bond length
+mol = qm.molecule([('H', 0, 0, 0), ('H', 0.74, 0, 0)])
+
+# Build electronic Hamiltonian with kinetic, nuclear attraction, and Coulomb terms
+H = (qm.HamiltonianBuilder()
+     .with_kinetic()
+     .with_nuclear_attraction()
+     .with_coulomb()  # Includes exchange automatically
+     .build())
+
+# Bind Hamiltonian to molecule for automatic geometry handling
+mol_H = qm.MolecularHamiltonian(H, mol)
+
+# Generate CI basis (Configuration Interaction)
+basis = mol.ci_basis(excitations=2)
+
+# Build and render the Hamiltonian matrix
+matrix = mol_H.matrix(basis)
+matrix.render()  # Displays evaluated matrix elements
+
+# Diagonalize to find eigenvalues and eigenvectors
+eigenvalues, eigenvectors = matrix.diagonalize()
+ground_state_energy = eigenvalues[0]
+
+print(f"Ground state energy: {ground_state_energy:.6f} Hartree")
+# Output: -1.353251 Hartree
+```
+
+### Workflow 4: Benchmark Data and Visualization
 
 This example demonstrates searching benchmark databases, retrieving experimental properties, and comparing with calculated molecular geometries.
 
 ```python
 from cm.data import BenchmarkAPI
-from cm.views import molecule
-from cm.qm import Molecule, atom
+from cm import qm, views
 import math
 
 # Search NIST benchmark database for water molecule
@@ -195,14 +222,14 @@ print(f"Experimental dipole: {dipole.value} {dipole.unit}")  # 1.85 Debye
 r_OH = 0.9572  # O-H bond length (Angstroms)
 angle_HOH = 104.52 * math.pi / 180  # H-O-H bond angle
 
-water_calc = Molecule([
-    (atom('O'), 0, 0, 0),
-    (atom('H'), r_OH, 0, 0),
-    (atom('H'), r_OH * math.cos(angle_HOH), r_OH * math.sin(angle_HOH), 0),
+water_calc = qm.molecule([
+    ('O', 0, 0, 0),
+    ('H', r_OH, 0, 0),
+    ('H', r_OH * math.cos(angle_HOH), r_OH * math.sin(angle_HOH), 0),
 ])
 
 # Visualize 3D structure in interactive WebGL viewer
-molecule(water_calc, show_bonds=True, rotate=True)
+views.molecule(water_calc, show_bonds=True, rotate=True)
 ```
 
 The NIST CCCBDB provides high-quality experimental and computational benchmark data essential for validating quantum chemical calculations.

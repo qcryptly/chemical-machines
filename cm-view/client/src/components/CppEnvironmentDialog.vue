@@ -510,7 +510,8 @@ async function createEnvironment() {
   margin-top: 1rem;
   border: 1px solid var(--border);
   border-radius: 4px;
-  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .log-header {
@@ -519,21 +520,27 @@ async function createEnvironment() {
   font-size: 0.8rem;
   color: var(--accent);
   border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 .log-output {
-  max-height: 200px;
+  height: 350px;
+  min-height: 150px;
+  max-height: 70vh;
   overflow-y: auto;
   overflow-x: auto;
   background: #0a0a12;
   font-family: 'Monaco', 'Menlo', 'Consolas', 'Liberation Mono', 'Courier New', monospace;
-  font-size: 0.75rem;
-  padding: 0.5rem;
-  line-height: 1.4;
+  font-size: 0.8rem;
+  padding: 0.75rem;
+  line-height: 1.5;
+  resize: vertical;
+  border-bottom-left-radius: 4px;
+  border-bottom-right-radius: 4px;
 }
 
 .dialog.expanded .log-output {
-  max-height: 300px;
+  height: 500px;
 }
 
 .log-line {

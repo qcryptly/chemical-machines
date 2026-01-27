@@ -8,7 +8,8 @@ from typing import Optional, List, Union, Dict, Set, Tuple, Any
 from dataclasses import dataclass, field
 
 from ..symbols import Expr, Var, Const, _ensure_expr, _get_sympy
-from .coordinates import Coordinate3D, CoordinateType
+from .. import views
+from .coordinates import Coordinate3D, CoordinateType, spherical_coord
 
 __all__ = [
     'SpinOrbital',
@@ -664,6 +665,33 @@ class SlaterDeterminant:
         html = f'<div class="cm-math cm-math-center">\\[ {latex} \\]</div>'
         views.html(html)
 
+    def conjugate(self) -> "SlaterDeterminant":
+        """
+        Return the complex conjugate of the Slater determinant.
+
+        For Slater determinants, conjugation creates the bra state ⟨Ψ|
+        from the ket state |Ψ⟩. Since the determinant is built from
+        orthonormal spin-orbitals, the conjugate is the same determinant
+        but interpreted as a bra.
+
+        This is primarily useful for clarity in expressions - the @ operator
+        already handles conjugation implicitly when computing ⟨ψ|φ⟩.
+
+        Returns:
+            Self (SlaterDeterminant with same orbitals)
+
+        Example:
+            psi = qm.slater(orbitals)
+            bra_psi = psi.conjugate()  # ⟨ψ|
+            # Equivalent to: psi @ phi computes ⟨ψ|φ⟩
+        """
+        # For orthonormal basis, conjugate is the same determinant
+        # The distinction is semantic (bra vs ket)
+        return self
+
+    # Alias for conjugate
+    conj = conjugate
+
     def __matmul__(self, other: Union["SlaterDeterminant", "Operator"]) -> "MatrixElement":
         """
         Compute inner product or begin matrix element.
@@ -678,6 +706,10 @@ class SlaterDeterminant:
             # Partial matrix element - store bra and operator
             return PartialMatrixElement(self, other)
         else:
+            # Check for MolecularHamiltonian (late import to avoid circular dependency)
+            from .hamiltonian import MolecularHamiltonian
+            if isinstance(other, MolecularHamiltonian):
+                return PartialMatrixElement(self, other)
             raise TypeError(f"Cannot use @ with SlaterDeterminant and {type(other)}")
 
     def __repr__(self):
@@ -718,7 +750,12 @@ class PartialMatrixElement:
     Intermediate result of bra @ operator, waiting for ket.
     """
 
-    def __init__(self, bra: SlaterDeterminant, operator: Operator):
+    def __init__(self, bra: SlaterDeterminant, operator: Any):
+        """
+        Args:
+            bra: The bra (left) SlaterDeterminant
+            operator: An Operator or MolecularHamiltonian
+        """
         self.bra = bra
         self.operator = operator
 
@@ -776,7 +813,13 @@ class MatrixElement:
     Uses Slater-Condon rules to determine which terms survive.
     """
 
-    def __init__(self, bra: SlaterDeterminant, operator: Operator, ket: SlaterDeterminant):
+    def __init__(self, bra: SlaterDeterminant, operator: Any, ket: SlaterDeterminant):
+        """
+        Args:
+            bra: The bra (left) SlaterDeterminant
+            operator: An Operator or MolecularHamiltonian
+            ket: The ket (right) SlaterDeterminant
+        """
         self.bra = bra
         self.operator = operator
         self.ket = ket
@@ -815,14 +858,34 @@ class MatrixElement:
             # Full notation
             bra_labels = ", ".join(self.bra.ket_labels())
             ket_labels = ", ".join(self.ket.ket_labels())
-            latex = f"\\langle {bra_labels} | {self.operator.latex} | {ket_labels} \\rangle"
+            op_latex = self._get_operator_latex()
+            latex = f"\\langle {bra_labels} | {op_latex} | {ket_labels} \\rangle"
 
         html = f'<div class="cm-math cm-math-center">\\[ {latex} \\]</div>'
         views.html(html)
 
+    def _is_one_electron_only(self) -> bool:
+        """Check if operator only contains one-electron terms."""
+        # Check for Operator class
+        if hasattr(self.operator, 'operator_type'):
+            return self.operator.operator_type == "one_electron"
+        # Check for MolecularHamiltonian
+        if hasattr(self.operator, 'n_body_max'):
+            return self.operator.n_body_max == 1
+        # Default to full Hamiltonian
+        return False
+
+    def _get_operator_latex(self) -> str:
+        """Get LaTeX representation of the operator."""
+        if hasattr(self.operator, 'latex'):
+            return self.operator.latex
+        if hasattr(self.operator, 'to_latex'):
+            return self.operator.to_latex()
+        return "\\hat{H}"
+
     def _render_diagonal(self) -> str:
         """Render diagonal matrix element (same determinant)."""
-        if self.operator.operator_type == "one_electron":
+        if self._is_one_electron_only():
             return "\\sum_i \\langle i | \\hat{h} | i \\rangle"
         else:
             # Full Hamiltonian
@@ -837,7 +900,7 @@ class MatrixElement:
         p = only_bra[0].ket_label
         q = only_ket[0].ket_label
 
-        if self.operator.operator_type == "one_electron":
+        if self._is_one_electron_only():
             return f"\\langle {p} | \\hat{{h}} | {q} \\rangle"
         else:
             return (f"\\langle {p} | \\hat{{h}} | {q} \\rangle + "
@@ -850,7 +913,7 @@ class MatrixElement:
         p, q = only_bra[0].ket_label, only_bra[1].ket_label
         r, s = only_ket[0].ket_label, only_ket[1].ket_label
 
-        if self.operator.operator_type == "one_electron":
+        if self._is_one_electron_only():
             return "0"
         else:
             return (f"\\langle {p} {q} | \\hat{{g}} | {r} {s} \\rangle - "

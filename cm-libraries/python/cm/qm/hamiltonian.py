@@ -8,6 +8,7 @@ from typing import Optional, List, Union, Tuple, Dict, Any, Set
 from dataclasses import dataclass, field
 
 from ..symbols import Expr, Var, Const, Sum, _ensure_expr
+from .. import views
 from .spinorbitals import SpinOrbital, SlaterDeterminant
 from .atoms import Atom
 from .molecules import Molecule
@@ -58,17 +59,26 @@ class HamiltonianBuilder:
     nuclear attraction, electron-electron repulsion, spin-orbit coupling, etc.
 
     Example:
+        # Symbolic/approximate integrals (fast)
         H = (qm.HamiltonianBuilder()
              .with_kinetic()
              .with_nuclear_attraction()
              .with_coulomb()
-             .with_spin_orbit()
+             .build())
+
+        # Proper Gaussian integrals (accurate)
+        H = (qm.HamiltonianBuilder()
+             .with_kinetic()
+             .with_nuclear_attraction()
+             .with_coulomb()
+             .with_basis('STO-3G')
              .build())
     """
 
     def __init__(self):
         self._terms: List[HamiltonianTerm] = []
         self._relativistic: bool = False
+        self._basis_name: Optional[str] = None
 
     # =========================================================================
     # TERM ADDITION (FLUENT API)
@@ -337,6 +347,34 @@ class HamiltonianBuilder:
         self._terms = [t for t in self._terms if t.name != term_name]
         return self
 
+    def with_basis(self, name: str = 'STO-3G') -> "HamiltonianBuilder":
+        """
+        Use proper Gaussian basis integrals instead of approximate Slater rules.
+
+        When a basis is specified, numerical evaluation will use accurate
+        Gaussian-type orbital integrals computed with the Boys function
+        and Obara-Saika/McMurchie-Davidson schemes.
+
+        Args:
+            name: Basis set name ('STO-3G' currently supported)
+
+        Returns:
+            self for chaining
+
+        Example:
+            H = (qm.HamiltonianBuilder()
+                 .with_kinetic()
+                 .with_nuclear_attraction()
+                 .with_coulomb()
+                 .with_basis('STO-3G')
+                 .build())
+
+            # Now matrix evaluation uses proper integrals
+            result = H.hartree_fock(molecule)
+        """
+        self._basis_name = name
+        return self
+
     # =========================================================================
     # PRESETS
     # =========================================================================
@@ -380,7 +418,11 @@ class HamiltonianBuilder:
         Returns:
             MolecularHamiltonian ready for matrix element evaluation
         """
-        return MolecularHamiltonian(self._terms, self._relativistic)
+        return MolecularHamiltonian(
+            self._terms,
+            self._relativistic,
+            basis_name=self._basis_name
+        )
 
     # =========================================================================
     # INSPECTION
@@ -412,14 +454,50 @@ class MolecularHamiltonian:
     between Slater determinants.
 
     Example:
+        # Symbolic/approximate mode
         H = qm.HamiltonianBuilder.electronic().build()
         psi = water.slater_determinant()
         E = H.element(psi, psi)  # Ground state energy expression
+
+        # With proper Gaussian integrals
+        H = (qm.HamiltonianBuilder.electronic()
+             .with_basis('STO-3G')
+             .build())
+        result = H.hartree_fock(molecule)  # Accurate HF calculation
     """
 
-    def __init__(self, terms: List[HamiltonianTerm], relativistic: bool = False):
-        self._terms = terms
-        self._relativistic = relativistic
+    def __init__(self, terms_or_hamiltonian: Union[List[HamiltonianTerm], "MolecularHamiltonian"],
+                 relativistic_or_molecule: Union[bool, Molecule] = False,
+                 basis_name: Optional[str] = None):
+        """
+        Create a MolecularHamiltonian.
+
+        Two calling conventions:
+        1. MolecularHamiltonian(terms, relativistic=False, basis_name=None) - from HamiltonianBuilder
+        2. MolecularHamiltonian(hamiltonian, molecule) - bind existing Hamiltonian to Molecule
+
+        Args:
+            terms_or_hamiltonian: List of HamiltonianTerm, OR existing MolecularHamiltonian
+            relativistic_or_molecule: bool for relativistic flag, OR Molecule to bind
+            basis_name: Gaussian basis set name (e.g., 'STO-3G') for proper integrals
+        """
+        # Check if this is the "bind to molecule" calling convention
+        if isinstance(terms_or_hamiltonian, MolecularHamiltonian):
+            # Copy terms from existing Hamiltonian
+            self._terms = terms_or_hamiltonian._terms
+            self._relativistic = terms_or_hamiltonian._relativistic
+            self._basis_name = terms_or_hamiltonian._basis_name
+            # Store the bound molecule
+            if isinstance(relativistic_or_molecule, Molecule):
+                self._molecule = relativistic_or_molecule
+            else:
+                self._molecule = None
+        else:
+            # Standard calling convention: terms list + relativistic flag
+            self._terms = terms_or_hamiltonian
+            self._relativistic = relativistic_or_molecule if isinstance(relativistic_or_molecule, bool) else False
+            self._basis_name = basis_name
+            self._molecule = None
 
     # =========================================================================
     # MATRIX ELEMENTS
@@ -436,16 +514,17 @@ class MolecularHamiltonian:
             bra: Bra Slater determinant
             ket: Ket Slater determinant
             molecule: Optional molecule for nuclear positions. If not provided,
-                      will try to infer from orbital centers.
+                      uses bound molecule or tries to infer from orbital centers.
 
         Returns:
             MatrixExpression (symbolic, can evaluate or compile)
         """
-        # Try to infer molecule from determinant if not provided
-        if molecule is None:
-            molecule = self._infer_molecule(bra)
+        # Use bound molecule, or try to infer from determinant
+        mol = molecule if molecule is not None else self._molecule
+        if mol is None:
+            mol = self._infer_molecule(bra)
 
-        return MatrixExpression(bra, ket, self, molecule)
+        return MatrixExpression(bra, ket, self, mol)
 
     def _infer_molecule(self, det: SlaterDeterminant) -> Optional[Molecule]:
         """Try to infer molecule from orbital centers and vec3 coordinates."""
@@ -476,12 +555,14 @@ class MolecularHamiltonian:
 
         Args:
             state: Slater determinant
-            molecule: Optional molecule for nuclear positions
+            molecule: Optional molecule for nuclear positions. If not provided,
+                      uses bound molecule (if any).
 
         Returns:
             MatrixExpression for ground state energy
         """
-        return self.element(state, state, molecule)
+        mol = molecule if molecule is not None else self._molecule
+        return self.element(state, state, mol)
 
     def matrix(self, basis: List[SlaterDeterminant],
               molecule: Optional[Molecule] = None) -> "HamiltonianMatrix":
@@ -490,12 +571,15 @@ class MolecularHamiltonian:
 
         Args:
             basis: List of Slater determinants
-            molecule: Optional molecule for nuclear positions
+            molecule: Optional molecule for nuclear positions. If not provided,
+                      uses the molecule bound at construction time (if any).
 
         Returns:
             HamiltonianMatrix (symbolic)
         """
-        return HamiltonianMatrix(basis, self, molecule)
+        # Use bound molecule if no molecule specified
+        mol = molecule if molecule is not None else self._molecule
+        return HamiltonianMatrix(basis, self, mol)
 
     # =========================================================================
     # PROPERTIES
@@ -524,6 +608,87 @@ class MolecularHamiltonian:
     def has_term(self, name: str) -> bool:
         """Check if term exists."""
         return any(t.name == name for t in self._terms)
+
+    @property
+    def molecule(self) -> Optional[Molecule]:
+        """Molecule bound to this Hamiltonian (if any)."""
+        return self._molecule
+
+    @property
+    def basis_name(self) -> Optional[str]:
+        """Gaussian basis set name (if using proper integrals)."""
+        return self._basis_name
+
+    @property
+    def uses_gaussian_integrals(self) -> bool:
+        """True if this Hamiltonian uses proper Gaussian basis integrals."""
+        return self._basis_name is not None
+
+    # =========================================================================
+    # HARTREE-FOCK WITH PROPER INTEGRALS
+    # =========================================================================
+
+    def hartree_fock(self, molecule: Optional[Molecule] = None,
+                     charge: int = 0,
+                     verbose: bool = False):
+        """
+        Perform Hartree-Fock calculation using proper Gaussian integrals.
+
+        Requires that .with_basis() was called on the builder.
+
+        Args:
+            molecule: Molecule to compute (uses bound molecule if not provided)
+            charge: Molecular charge (default 0)
+            verbose: Print SCF iteration info
+
+        Returns:
+            HFResult with energy, orbitals, and matrices
+
+        Raises:
+            ValueError: If no basis set was specified
+
+        Example:
+            H = (qm.HamiltonianBuilder()
+                 .with_kinetic()
+                 .with_nuclear_attraction()
+                 .with_coulomb()
+                 .with_basis('STO-3G')
+                 .build())
+
+            mol = qm.molecule([('H', 0, 0, 0), ('H', 0.74, 0, 0)])
+            result = H.hartree_fock(mol)
+            print(f"Energy: {result.energy:.6f} Hartree")
+        """
+        if self._basis_name is None:
+            raise ValueError(
+                "No basis set specified. Use .with_basis('STO-3G') in HamiltonianBuilder "
+                "to enable proper Gaussian integrals."
+            )
+
+        mol = molecule if molecule is not None else self._molecule
+        if mol is None:
+            raise ValueError("No molecule provided. Pass a molecule or bind one to the Hamiltonian.")
+
+        # Convert Molecule to atom list format for hartree_fock
+        atoms = []
+        for atom, pos in zip(mol.atoms, mol.positions):
+            # Get element symbol
+            from .data import ELEMENT_SYMBOLS
+            symbol = ELEMENT_SYMBOLS.get(atom.Z, 'X')
+            atoms.append((symbol, tuple(pos)))
+
+        # Determine electron count
+        n_electrons = sum(a.Z for a in mol.atoms) - charge
+
+        # Import and run HF solver
+        from .integrals import hartree_fock as hf_solve
+        return hf_solve(
+            atoms=atoms,
+            n_electrons=n_electrons,
+            charge=charge,
+            basis=self._basis_name,
+            verbose=verbose
+        )
 
     # =========================================================================
     # RENDERING
@@ -1552,16 +1717,41 @@ class HamiltonianMatrix:
         """
         return self.eigenvalues(**var_bindings)[0]
 
+    def diagonalize(self, **var_bindings) -> Tuple:
+        """
+        Diagonalize the Hamiltonian matrix.
+
+        This is an alias for eigenvectors() that returns both
+        eigenvalues and eigenvectors.
+
+        Args:
+            **var_bindings: Variable values for geometry
+
+        Returns:
+            (eigenvalues, eigenvectors) tuple where:
+            - eigenvalues: numpy array of energies (sorted ascending)
+            - eigenvectors: numpy array with columns as eigenvectors
+
+        Example:
+            eigenvalues, eigenvectors = matrix.diagonalize()
+            ground_state_energy = eigenvalues[0]
+            ground_state_coefficients = eigenvectors[:, 0]
+        """
+        return self.eigenvectors(**var_bindings)
+
     # =========================================================================
     # RENDERING
     # =========================================================================
 
-    def render(self, max_size: int = 10, **var_bindings):
+    def render(self, max_size: int = 10, numeric: bool = None, **var_bindings):
         """
         Render the Hamiltonian matrix.
 
         Args:
             max_size: Maximum matrix size to display
+            numeric: If True, force numeric display. If False, force symbolic.
+                     If None (default), auto-detect based on whether geometry
+                     has free variables.
             **var_bindings: Optional variable values for numeric display
         """
         if self._n > max_size:
@@ -1569,8 +1759,17 @@ class HamiltonianMatrix:
             views.html(html)
             return
 
-        if var_bindings:
-            # Numeric display
+        # Auto-detect numeric mode if not specified
+        if numeric is None:
+            # Check if molecule has symbolic geometry
+            has_symbolic = False
+            if self._molecule and self._molecule.is_symbolic:
+                has_symbolic = True
+            # Use numeric if no symbolic variables or if var_bindings provided
+            numeric = not has_symbolic or bool(var_bindings)
+
+        if numeric:
+            # Numeric display - evaluate all elements
             import numpy as np
             H = self.numerical(**var_bindings)
 

@@ -38,6 +38,17 @@ RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -
     && conda init bash \
     && conda update -n base -c defaults conda -y
 
+# Install all Python packages in base environment
+# Scientific computing
+RUN pip install --no-cache-dir \
+    numpy scipy pandas scikit-learn \
+    sympy matplotlib pillow \
+    jedi \
+    biopython rdkit openmm mdanalysis \
+    psycopg2-binary elasticsearch \
+    pybind11
+# PyTorch installed at runtime via init-base-env.sh for CUDA detection
+
 # Install Node.js
 RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION} | bash - \
     && apt-get install -y nodejs
@@ -72,19 +83,10 @@ RUN mkdir -p /var/lib/postgresql/data \
     && echo "host all all 0.0.0.0/0 md5" >> /var/lib/postgresql/data/pg_hba.conf \
     && echo "listen_addresses='*'" >> /var/lib/postgresql/data/postgresql.conf
 
+# Accept conda channels for PyTorch (used by init-base-env.sh)
 RUN conda tos accept --override-channels --channel https://conda.anaconda.org/pytorch \
     && conda tos accept --override-channels --channel https://conda.anaconda.org/nvidia \
     && conda tos accept --override-channels --channel default
-
-# Create conda environment for compute with PyTorch + CUDA
-RUN conda create -n chemcomp python=3.12 -y \
-    && conda install -n chemcomp -c pytorch -c nvidia pytorch torchvision torchaudio pytorch-cuda -y
-
-RUN conda run -n chemcomp pip install --no-cache-dir \
-        numpy scipy scikit-learn pandas \
-        biopython rdkit openmm mdanalysis \
-        psycopg2-binary elasticsearch \
-        pybind11
 
 # Create application user
 RUN useradd -m -s /bin/bash cmuser
@@ -107,8 +109,6 @@ RUN service postgresql start \
     && su - postgres -c "psql -c \"GRANT ALL PRIVILEGES ON DATABASE chemicalmachines TO cmuser;\"" \
     && service postgresql stop
 
-# Update supervisord to use conda environment for cm-compute
-RUN sed -i 's|/usr/bin/node /app/cm-compute|/opt/conda/envs/chemcomp/bin/python /app/cm-compute|g' /etc/supervisor/conf.d/supervisord.conf
 
 # Expose ports
 EXPOSE 3000 5432 9200

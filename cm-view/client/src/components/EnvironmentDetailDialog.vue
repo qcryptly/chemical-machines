@@ -124,8 +124,15 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import axios from 'axios'
+import {
+  getActiveJob,
+  setActiveJob,
+  updateJobStatus,
+  appendJobLog,
+  clearActiveJob
+} from '../stores/envJobs'
 
 const props = defineProps({
   environment: { type: Object, required: true },
@@ -133,6 +140,9 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['close', 'updated'])
+
+// Track active WebSocket connection
+let activeWs = null
 
 const packages = ref([])
 const loading = ref(true)
@@ -308,10 +318,19 @@ async function installPackages() {
     const { jobId } = response.data
     installStatus.value = response.data.message || 'Installing packages...'
 
+    // Store the active job so we can reconnect if dialog is closed
+    setActiveJob(props.environment.name, {
+      jobId,
+      status: installStatus.value,
+      logs: [],
+      packages: [...packagesToInstall.value]
+    })
+
     // Subscribe to job output via WebSocket
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const wsUrl = `${wsProtocol}//${window.location.host}/ws`
     const ws = new WebSocket(wsUrl)
+    activeWs = ws
 
     ws.onopen = () => {
       ws.send(JSON.stringify({ type: 'subscribe', jobId }))
@@ -323,6 +342,7 @@ async function installPackages() {
 
         if (data.type === 'subscribed') {
           installLogs.value.push({ type: 'progress', message: 'Connected to job stream...' })
+          appendJobLog(props.environment.name, { type: 'progress', message: 'Connected to job stream...' })
         } else if (data.type === 'job_output') {
           const { stream, data: outputData } = data
           const streamLower = stream?.toLowerCase()
@@ -330,6 +350,9 @@ async function installPackages() {
           if (streamLower === 'stdout' || streamLower === 'stderr') {
             const logType = streamLower === 'stderr' ? 'error' : 'progress'
             appendTerminalOutput(outputData, logType)
+            // Also save to store for reconnection
+            const lines = outputData.split('\n').filter(l => l.trim())
+            lines.forEach(line => appendJobLog(props.environment.name, { type: logType, message: line }))
           } else if (streamLower === 'result') {
             installStatus.value = 'Packages installed successfully!'
             installLogs.value.push({ type: 'success', message: 'Packages installed successfully!' })
@@ -339,19 +362,25 @@ async function installPackages() {
             emit('updated')
 
             isInstalling.value = false
+            clearActiveJob(props.environment.name)
             ws.close()
           } else if (streamLower === 'error') {
             installStatus.value = `Error: ${outputData}`
             installLogs.value.push({ type: 'error', message: outputData })
             isInstalling.value = false
+            clearActiveJob(props.environment.name)
             ws.close()
           } else if (streamLower === 'complete') {
             if (!installStatus.value.includes('successfully')) {
               installStatus.value = 'Job completed'
             }
             isInstalling.value = false
+            clearActiveJob(props.environment.name)
             ws.close()
           }
+
+          // Update status in store
+          updateJobStatus(props.environment.name, installStatus.value)
 
           await nextTick()
           if (logOutput.value) {
@@ -361,6 +390,7 @@ async function installPackages() {
           installStatus.value = `Error: ${data.error}`
           installLogs.value.push({ type: 'error', message: data.error })
           isInstalling.value = false
+          clearActiveJob(props.environment.name)
           ws.close()
         }
       } catch (e) {
@@ -376,7 +406,9 @@ async function installPackages() {
     }
 
     ws.onclose = () => {
+      activeWs = null
       if (isInstalling.value && !installStatus.value.includes('successfully')) {
+        // Don't clear the job - it might still be running, just disconnected
         isInstalling.value = false
       }
     }
@@ -485,8 +517,113 @@ async function removePackage(packageName) {
   }
 }
 
+// Reconnect to an active job's WebSocket
+function reconnectToJob(jobId) {
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const wsUrl = `${wsProtocol}//${window.location.host}/ws`
+  const ws = new WebSocket(wsUrl)
+  activeWs = ws
+
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ type: 'subscribe', jobId }))
+  }
+
+  ws.onmessage = async (event) => {
+    try {
+      const data = JSON.parse(event.data)
+
+      if (data.type === 'subscribed') {
+        installLogs.value.push({ type: 'progress', message: 'Reconnected to job stream...' })
+        appendJobLog(props.environment.name, { type: 'progress', message: 'Reconnected to job stream...' })
+      } else if (data.type === 'job_output') {
+        const { stream, data: outputData } = data
+        const streamLower = stream?.toLowerCase()
+
+        if (streamLower === 'stdout' || streamLower === 'stderr') {
+          const logType = streamLower === 'stderr' ? 'error' : 'progress'
+          appendTerminalOutput(outputData, logType)
+          // Also save to store
+          const lines = outputData.split('\n').filter(l => l.trim())
+          lines.forEach(line => appendJobLog(props.environment.name, { type: logType, message: line }))
+        } else if (streamLower === 'result') {
+          installStatus.value = 'Packages installed successfully!'
+          installLogs.value.push({ type: 'success', message: 'Packages installed successfully!' })
+
+          packagesToInstall.value = []
+          await loadPackages()
+          emit('updated')
+
+          isInstalling.value = false
+          clearActiveJob(props.environment.name)
+          ws.close()
+        } else if (streamLower === 'error') {
+          installStatus.value = `Error: ${outputData}`
+          installLogs.value.push({ type: 'error', message: outputData })
+          isInstalling.value = false
+          clearActiveJob(props.environment.name)
+          ws.close()
+        } else if (streamLower === 'complete') {
+          if (!installStatus.value.includes('successfully')) {
+            installStatus.value = 'Job completed'
+          }
+          isInstalling.value = false
+          clearActiveJob(props.environment.name)
+          ws.close()
+        }
+
+        await nextTick()
+        if (logOutput.value) {
+          logOutput.value.scrollTop = logOutput.value.scrollHeight
+        }
+      } else if (data.type === 'error') {
+        installStatus.value = `Error: ${data.error}`
+        installLogs.value.push({ type: 'error', message: data.error })
+        isInstalling.value = false
+        clearActiveJob(props.environment.name)
+        ws.close()
+      }
+    } catch (e) {
+      console.error('Error parsing WebSocket message:', e)
+    }
+  }
+
+  ws.onerror = (error) => {
+    console.error('WebSocket error:', error)
+    installStatus.value = 'WebSocket connection error'
+    installLogs.value.push({ type: 'error', message: 'WebSocket connection error' })
+    isInstalling.value = false
+  }
+
+  ws.onclose = () => {
+    activeWs = null
+    if (isInstalling.value && !installStatus.value.includes('successfully')) {
+      isInstalling.value = false
+    }
+  }
+}
+
 onMounted(() => {
   loadPackages()
+
+  // Check if there's an active job for this environment and reconnect
+  const activeJob = getActiveJob(props.environment.name)
+  if (activeJob) {
+    isInstalling.value = true
+    installStatus.value = activeJob.status
+    installLogs.value = [...activeJob.logs]
+    packagesToInstall.value = [...activeJob.packages]
+
+    // Reconnect to the WebSocket
+    reconnectToJob(activeJob.jobId)
+  }
+})
+
+onUnmounted(() => {
+  // Close WebSocket but don't clear the job - it's still running
+  if (activeWs) {
+    activeWs.close()
+    activeWs = null
+  }
 })
 
 watch(() => props.environment, () => {
@@ -782,7 +919,8 @@ watch(() => props.environment, () => {
   margin-bottom: 1rem;
   border: 1px solid var(--border);
   border-radius: 4px;
-  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .log-header {
@@ -791,21 +929,27 @@ watch(() => props.environment, () => {
   font-size: 0.8rem;
   color: var(--accent);
   border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 .log-output {
-  max-height: 150px;
+  height: 350px;
+  min-height: 150px;
+  max-height: 70vh;
   overflow-y: auto;
   overflow-x: auto;
   background: #0a0a12;
   font-family: 'Monaco', 'Menlo', 'Consolas', 'Liberation Mono', 'Courier New', monospace;
-  font-size: 0.75rem;
-  padding: 0.5rem;
-  line-height: 1.4;
+  font-size: 0.8rem;
+  padding: 0.75rem;
+  line-height: 1.5;
+  resize: vertical;
+  border-bottom-left-radius: 4px;
+  border-bottom-right-radius: 4px;
 }
 
 .dialog.expanded .log-output {
-  max-height: 250px;
+  height: 500px;
 }
 
 .log-line {

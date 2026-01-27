@@ -39,6 +39,7 @@ from .visualization import (
     surface,
     molecule,
     crystal,
+    orbital,
 )
 
 __all__ = [
@@ -58,4 +59,5 @@ __all__ = [
     'surface',
     'molecule',
     'crystal',
+    'orbital',
 ]

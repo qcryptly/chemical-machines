@@ -8,7 +8,7 @@ from typing import Optional, List, Union, Dict, Any, Tuple
 import json
 import math
 
-from .output import html
+from .output import html, webgl
 
 __all__ = [
     'ELEMENT_DATA',
@@ -17,6 +17,7 @@ __all__ = [
     'surface',
     'molecule',
     'crystal',
+    'orbital',
 ]
 
 
@@ -1587,5 +1588,257 @@ def crystal(
         box_color=box_color,
         box_labels=box_labels,
         background=background,
+        auto_rotate=auto_rotate
+    )
+
+
+def orbital(
+    hf_result,
+    mo_index: Union[int, str] = -1,
+    isovalue: float = 0.02,
+    resolution: int = 40,
+    positive_color: str = '#4444ff',
+    negative_color: str = '#ff4444',
+    opacity: float = 0.7,
+    show_molecule: bool = True,
+    atom_scale: float = 0.3,
+    bond_radius: float = 0.08,
+    unit_box: bool = False,
+    background: str = '#1e1e2e',
+    auto_rotate: bool = False
+):
+    """
+    Visualize a molecular orbital from Hartree-Fock results.
+
+    Renders isosurfaces showing the positive (blue) and negative (red) lobes
+    of a molecular orbital, optionally with the molecular structure.
+
+    Args:
+        hf_result: HFResult from hartree_fock() calculation. Must include
+                   atoms attribute or be passed with atoms separately.
+        mo_index: Which MO to visualize:
+                  - Integer: 0-indexed orbital number
+                  - Negative int: HOMO-n (e.g., -1 = HOMO, -2 = HOMO-1)
+                  - 'HOMO': Highest occupied MO
+                  - 'LUMO': Lowest unoccupied MO
+        isovalue: Isosurface value (default 0.02, typical range 0.01-0.05)
+        resolution: Grid resolution for orbital evaluation (default 40)
+        positive_color: Color for positive lobe (default blue)
+        negative_color: Color for negative lobe (default red)
+        opacity: Surface opacity 0-1 (default 0.7)
+        show_molecule: Show molecular structure (default True)
+        atom_scale: Atom radius scale (default 0.3)
+        bond_radius: Bond cylinder radius (default 0.08)
+        unit_box: Show bounding box (default False)
+        background: Background color
+        auto_rotate: Auto-rotate the scene (default True)
+
+    Example:
+        from cm.qm import hartree_fock
+        from cm.views import orbital
+
+        # H2 molecule
+        result = hartree_fock([
+            ('H', (0, 0, 0)),
+            ('H', (0.74, 0, 0))
+        ], n_electrons=2)
+
+        # Visualize HOMO (bonding orbital)
+        orbital(result, mo_index='HOMO')
+
+        # Visualize LUMO (antibonding orbital)
+        orbital(result, mo_index='LUMO')
+
+        # Visualize specific orbital with custom settings
+        orbital(result, mo_index=0, isovalue=0.03, opacity=0.8)
+    """
+    import numpy as np
+
+    # Import orbital extraction functions
+    from cm.qm.integrals.orbital import (
+        extract_orbital_isosurface,
+        create_orbital_grid
+    )
+    from cm.qm.integrals.basis import BasisSet
+
+    # Get atoms from hf_result or require them
+    if hasattr(hf_result, 'atoms'):
+        atoms = hf_result.atoms
+    else:
+        raise ValueError(
+            "hf_result must have 'atoms' attribute. "
+            "Use the newer hartree_fock() that stores atom information."
+        )
+
+    # Build basis set
+    basis = BasisSet('STO-3G')
+    basis.build_for_molecule(atoms)
+
+    # Handle string mo_index
+    n_electrons = sum(
+        {'H': 1, 'He': 2, 'Li': 3, 'Be': 4, 'B': 5, 'C': 6, 'N': 7, 'O': 8, 'F': 9, 'Ne': 10}.get(el, 1)
+        for el, _ in atoms
+    )
+    n_occ = n_electrons // 2  # Number of occupied orbitals
+
+    if isinstance(mo_index, str):
+        if mo_index.upper() == 'HOMO':
+            mo_index = n_occ - 1
+        elif mo_index.upper() == 'LUMO':
+            mo_index = n_occ
+        else:
+            raise ValueError(f"Unknown orbital name: {mo_index}. Use 'HOMO', 'LUMO', or integer.")
+
+    # Extract isosurfaces
+    pos_verts, pos_faces, neg_verts, neg_faces = extract_orbital_isosurface(
+        hf_result.mo_coefficients,
+        mo_index,
+        basis,
+        atoms,
+        isovalue=isovalue,
+        resolution=resolution
+    )
+
+    # Convert from Bohr to Angstrom for visualization
+    BOHR_TO_ANGSTROM = 0.529177
+    pos_verts = pos_verts * BOHR_TO_ANGSTROM
+    neg_verts = neg_verts * BOHR_TO_ANGSTROM
+
+    # Calculate molecule extent
+    positions = np.array([[a[1][0], a[1][1], a[1][2]] for a in atoms])
+    center = positions.mean(axis=0)
+    extent = positions.max(axis=0) - positions.min(axis=0)
+    max_extent = max(extent) + 5
+
+    # Generate JavaScript for orbital surfaces
+    scene_js = '''
+        const orbitalGroup = new THREE.Group();
+    '''
+
+    # Add positive lobe
+    if len(pos_verts) > 0:
+        pos_vertex_data = ', '.join([f'{v[0]}, {v[1]}, {v[2]}' for v in pos_verts])
+        pos_face_data = ', '.join([f'{f[0]}, {f[1]}, {f[2]}' for f in pos_faces])
+
+        scene_js += f'''
+        // Positive lobe (blue)
+        {{
+            const posGeometry = new THREE.BufferGeometry();
+            const posVertices = new Float32Array([{pos_vertex_data}]);
+            const posIndices = new Uint32Array([{pos_face_data}]);
+            posGeometry.setAttribute('position', new THREE.BufferAttribute(posVertices, 3));
+            posGeometry.setIndex(new THREE.BufferAttribute(posIndices, 1));
+            posGeometry.computeVertexNormals();
+
+            const posMaterial = new THREE.MeshPhongMaterial({{
+                color: '{positive_color}',
+                transparent: true,
+                opacity: {opacity},
+                side: THREE.DoubleSide,
+                shininess: 50
+            }});
+
+            const posMesh = new THREE.Mesh(posGeometry, posMaterial);
+            orbitalGroup.add(posMesh);
+        }}
+    '''
+
+    # Add negative lobe
+    if len(neg_verts) > 0:
+        neg_vertex_data = ', '.join([f'{v[0]}, {v[1]}, {v[2]}' for v in neg_verts])
+        neg_face_data = ', '.join([f'{f[0]}, {f[1]}, {f[2]}' for f in neg_faces])
+
+        scene_js += f'''
+        // Negative lobe (red)
+        {{
+            const negGeometry = new THREE.BufferGeometry();
+            const negVertices = new Float32Array([{neg_vertex_data}]);
+            const negIndices = new Uint32Array([{neg_face_data}]);
+            negGeometry.setAttribute('position', new THREE.BufferAttribute(negVertices, 3));
+            negGeometry.setIndex(new THREE.BufferAttribute(negIndices, 1));
+            negGeometry.computeVertexNormals();
+
+            const negMaterial = new THREE.MeshPhongMaterial({{
+                color: '{negative_color}',
+                transparent: true,
+                opacity: {opacity},
+                side: THREE.DoubleSide,
+                shininess: 50
+            }});
+
+            const negMesh = new THREE.Mesh(negGeometry, negMaterial);
+            orbitalGroup.add(negMesh);
+        }}
+    '''
+
+    # Add molecule if requested
+    if show_molecule:
+        elements = [a[0] for a in atoms]
+
+        # Add atoms
+        for i, (element, pos) in enumerate(atoms):
+            x, y, z = pos
+            elem_data = ELEMENT_DATA.get(element, {'color': '#FF00FF', 'radius': 1.0})
+            color = elem_data['color']
+            radius = elem_data['radius'] * atom_scale
+
+            scene_js += f'''
+        {{
+            const atomGeo = new THREE.SphereGeometry({radius}, 24, 16);
+            const atomMat = new THREE.MeshPhongMaterial({{
+                color: '{color}',
+                shininess: 80
+            }});
+            const atom = new THREE.Mesh(atomGeo, atomMat);
+            atom.position.set({x}, {y}, {z});
+            orbitalGroup.add(atom);
+        }}
+    '''
+
+        # Infer and add bonds
+        bonds = _infer_bonds([(el, x, y, z) for (el, (x, y, z)) in atoms], bond_tolerance=0.4)
+        for i1, i2 in bonds:
+            p1 = np.array(atoms[i1][1])
+            p2 = np.array(atoms[i2][1])
+            mid = (p1 + p2) / 2
+            diff = p2 - p1
+            length = np.linalg.norm(diff)
+
+            if length < 0.01:
+                continue
+
+            direction = diff / length
+
+            scene_js += f'''
+        {{
+            const bondGeo = new THREE.CylinderGeometry({bond_radius}, {bond_radius}, {length}, 8);
+            const bondMat = new THREE.MeshPhongMaterial({{
+                color: '#888888',
+                shininess: 30
+            }});
+            const bond = new THREE.Mesh(bondGeo, bondMat);
+            bond.position.set({mid[0]}, {mid[1]}, {mid[2]});
+
+            const direction = new THREE.Vector3({direction[0]}, {direction[1]}, {direction[2]});
+            const axis = new THREE.Vector3(0, 1, 0);
+            bond.quaternion.setFromUnitVectors(axis, direction);
+
+            orbitalGroup.add(bond);
+        }}
+    '''
+
+    scene_js += '''
+        scene.add(orbitalGroup);
+    '''
+
+    # Camera position
+    cam_pos = (center[0] + max_extent, center[1] + max_extent * 0.3, center[2] + max_extent)
+
+    _webgl_scene(
+        scene_objects=scene_js,
+        background=background,
+        camera_position=cam_pos,
+        camera_target=tuple(center),
+        unit_box=unit_box,
         auto_rotate=auto_rotate
     )

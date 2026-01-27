@@ -78,9 +78,9 @@ function createSession(workspaceId, emit, options = {}) {
   });
 
   // Send initial setup commands
-  // Activate conda and the default 'torch' environment
+  // Activate conda base environment
   ptyProcess.write('source /opt/conda/etc/profile.d/conda.sh 2>/dev/null\n');
-  ptyProcess.write('conda activate torch 2>/dev/null || true\n');
+  ptyProcess.write('conda activate base 2>/dev/null || true\n');
   ptyProcess.write('clear\n');
 
   return sessionId;

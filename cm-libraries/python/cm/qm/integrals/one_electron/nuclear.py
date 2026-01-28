@@ -16,8 +16,8 @@ import numpy as np
 import math
 from typing import Tuple, List
 
-from .basis import GaussianPrimitive, ContractedGaussian, BasisFunction, BasisSet
-from .boys import boys_function
+from ..basis import GaussianPrimitive, ContractedGaussian, BasisFunction, BasisSet
+from ..utils.boys import boys_function
 
 
 def hermite_coefficient(i: int, j: int, t: int, Qx: float, a: float, b: float) -> float:

@@ -17,7 +17,7 @@ import numpy as np
 import math
 from typing import Tuple
 
-from .basis import GaussianPrimitive, ContractedGaussian, BasisFunction, BasisSet
+from ..basis import GaussianPrimitive, ContractedGaussian, BasisFunction, BasisSet
 from .overlap import overlap_1d
 
 

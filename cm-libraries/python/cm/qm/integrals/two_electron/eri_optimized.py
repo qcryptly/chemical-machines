@@ -390,15 +390,15 @@ def _compute_single_eri_torch(prim_data, i, j, k, l, device):
                     else:
                         # Higher angular momentum - use CPU fallback
                         # For a full implementation, we'd need McMurchie-Davidson on GPU
-                        from .eri import _primitive_eri
-                        from .basis import GaussianPrimitive
+                        from .eri import eri_primitive
+                        from ..basis import GaussianPrimitive
 
                         prim_i = GaussianPrimitive(alpha.item(), tuple(A.cpu().numpy()), tuple(ang_i.cpu().numpy()))
                         prim_j = GaussianPrimitive(beta.item(), tuple(B.cpu().numpy()), tuple(ang_j.cpu().numpy()))
                         prim_k = GaussianPrimitive(gamma.item(), tuple(C.cpu().numpy()), tuple(ang_k.cpu().numpy()))
                         prim_l = GaussianPrimitive(delta.item(), tuple(D.cpu().numpy()), tuple(ang_l.cpu().numpy()))
 
-                        val = _primitive_eri(prim_i, prim_j, prim_k, prim_l)
+                        val = eri_primitive(prim_i, prim_j, prim_k, prim_l)
                         result += c_i.item() * c_j.item() * c_k.item() * c_l.item() * val
 
     return result

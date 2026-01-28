@@ -43,6 +43,27 @@ Complete reference documentation for the `cm` library - a Python library for cre
   - [Matrix Expressions](#matrix-expressions)
   - [CI Basis Generation](#ci-basis-generation)
   - [Molecular Integrals (cm.qm.integrals)](#molecular-integrals-cmqmintegrals)
+    - [Basis Sets](#basis-sets)
+    - [Gaussian Primitives](#gaussian-primitives-and-contracted-functions)
+    - [One-Electron Integrals](#one-electron-integrals)
+    - [Two-Electron Integrals (ERI)](#two-electron-integrals-eri)
+    - [Hartree-Fock Solver](#hartree-fock-solver)
+    - [Kohn-Sham DFT](#kohn-sham-dft)
+    - [Unrestricted HF (UHF)](#unrestricted-hartree-fock-uhf)
+    - [MP2 Perturbation Theory](#mp2-perturbation-theory)
+    - [CCSD(T) Coupled Cluster](#ccsdt-coupled-cluster)
+    - [Analytic Gradients](#analytic-gradients)
+    - [Geometry Optimization](#geometry-optimization)
+    - [Transition State Search](#transition-state-search)
+    - [Internal Coordinates](#internal-coordinates)
+    - [Frequency Analysis](#frequency-analysis)
+    - [Thermochemistry](#thermochemistry)
+    - [TDDFT Excited States](#tddft-excited-states)
+    - [PCM Solvation](#pcm-solvation)
+    - [Dipole Moments](#dipole-moments)
+    - [Polarizability](#polarizability)
+    - [Effective Core Potentials](#effective-core-potentials-ecps)
+    - [Molecular Orbital Visualization](#molecular-orbital-visualization)
 - [C++ Support](#c-support)
 - [Colormaps Reference](#colormaps-reference)
 - [Element Data Reference](#element-data-reference)
@@ -2923,6 +2944,375 @@ F1 = boys_function(1, 2.5)   # F₁(2.5)
 import numpy as np
 x_values = np.linspace(0, 10, 100)
 F0_values = boys_function(0, x_values)
+```
+
+#### Kohn-Sham DFT
+
+Density Functional Theory with various exchange-correlation functionals.
+
+```python
+from cm.qm.integrals import kohn_sham, DFTResult, get_functional, list_functionals
+
+# List available functionals
+print(list_functionals())
+# ['SVWN5', 'BLYP', 'PBE', 'B3LYP', 'PBE0', 'M06', 'M06-2X', 'CAM-B3LYP', 'wB97X-D', ...]
+
+# Run DFT calculation
+atoms = [('O', (0, 0, 0)), ('H', (0.96, 0, 0)), ('H', (-0.24, 0.93, 0))]
+result = kohn_sham(
+    atoms,
+    functional='B3LYP',   # Hybrid functional
+    basis='6-31G*',
+    verbose=True
+)
+
+print(f"DFT Energy: {result.energy:.6f} Hartree")
+print(f"XC Energy: {result.E_xc:.6f} Hartree")
+print(f"Exact exchange fraction: {result.exact_exchange_fraction}")
+
+# Access orbitals and density
+C = result.mo_coefficients
+eps = result.orbital_energies
+P = result.density
+```
+
+**Available Functionals:**
+
+| Category | Functionals |
+|----------|-------------|
+| LDA | SVWN5 |
+| GGA | BLYP, PBE |
+| Hybrid | B3LYP, PBE0, M06, M06-2X |
+| Range-separated | CAM-B3LYP, ωB97X-D, ωB97M-V |
+
+#### Unrestricted Hartree-Fock (UHF)
+
+For open-shell systems with unpaired electrons.
+
+```python
+from cm.qm.integrals import uhf, UHFResult
+
+# Oxygen atom (triplet ground state)
+atoms = [('O', (0, 0, 0))]
+result = uhf(
+    atoms,
+    basis='6-31G*',
+    n_alpha=5,    # 5 alpha electrons
+    n_beta=3,     # 3 beta electrons
+    verbose=True
+)
+
+print(f"UHF Energy: {result.energy:.6f} Hartree")
+print(f"<S²>: {result.S2:.4f}")  # Spin contamination
+print(f"Multiplicity: {result.multiplicity}")
+```
+
+#### MP2 Perturbation Theory
+
+Second-order Møller-Plesset perturbation theory for electron correlation.
+
+```python
+from cm.qm.integrals import hartree_fock, mp2, MP2Result
+
+# First run HF
+hf_result = hartree_fock(atoms, basis='cc-pVTZ', n_electrons=10)
+
+# MP2 correlation energy
+mp2_result = mp2(hf_result)
+print(f"HF Energy: {mp2_result.energy_hf:.6f} Hartree")
+print(f"MP2 Correlation: {mp2_result.energy_mp2:.6f} Hartree")
+print(f"Total Energy: {mp2_result.energy_total:.6f} Hartree")
+
+# SCS-MP2 (spin-component scaled)
+from cm.qm.integrals import compute_scs_mp2_energy
+E_scs = compute_scs_mp2_energy(mp2_result)
+```
+
+#### Analytic Gradients
+
+Compute energy gradients for geometry optimization.
+
+```python
+from cm.qm.integrals import hartree_fock, hf_gradient, dft_gradient, kohn_sham
+
+# HF gradient
+hf = hartree_fock(atoms, basis='6-31G*', n_electrons=10)
+grad = hf_gradient(hf)
+print(f"Gradient shape: {grad.gradient.shape}")  # (n_atoms, 3)
+print(f"Max gradient: {grad.max_gradient:.6f} Hartree/Bohr")
+
+# DFT gradient
+dft = kohn_sham(atoms, functional='B3LYP', basis='6-31G*')
+grad = dft_gradient(dft)
+```
+
+#### Geometry Optimization
+
+Optimize molecular geometries using quasi-Newton methods.
+
+```python
+from cm.qm.integrals import optimize_geometry, GeometryOptimizer, OptimizationResult
+
+# Simple interface
+atoms = [('O', (0, 0, 0)), ('H', (1.0, 0, 0)), ('H', (-0.3, 0.9, 0))]
+result = optimize_geometry(
+    atoms,
+    method='B3LYP',
+    basis='6-31G*',
+    algorithm='BFGS',
+    convergence={'gradient': 1e-4, 'energy': 1e-6},
+    verbose=True
+)
+
+print(f"Optimized energy: {result.energy:.6f} Hartree")
+print(f"Converged: {result.converged}")
+print(f"Iterations: {result.n_iterations}")
+
+# Access optimized geometry
+for elem, pos in result.atoms:
+    print(f"{elem}: {pos}")
+
+# Full optimizer class
+optimizer = GeometryOptimizer(
+    method='B3LYP',
+    basis='6-31G*',
+    algorithm='BFGS',
+    max_iterations=100
+)
+result = optimizer.optimize(atoms)
+```
+
+#### Transition State Search
+
+Find first-order saddle points using eigenvector-following.
+
+```python
+from cm.qm.integrals import find_transition_state, TransitionStateOptimizer, TSResult
+
+# H2 + H -> H + H2 transition state guess
+atoms = [
+    ('H', (-1.0, 0, 0)),
+    ('H', (0.0, 0, 0)),
+    ('H', (1.2, 0, 0))
+]
+
+result = find_transition_state(
+    atoms,
+    method='HF',
+    basis='6-31G*',
+    mode_follow=0,  # Follow lowest eigenmode
+    verbose=True
+)
+
+print(f"TS Energy: {result.energy:.6f} Hartree")
+print(f"Imaginary frequency: {result.imaginary_freq:.1f}i cm⁻¹")
+print(f"Converged: {result.converged}")
+```
+
+#### Internal Coordinates
+
+Work with internal coordinates (bonds, angles, dihedrals).
+
+```python
+from cm.qm.integrals import InternalCoordinates
+
+# Define internal coordinates for water
+atoms = [('O', (0, 0, 0)), ('H', (0.96, 0, 0)), ('H', (-0.24, 0.93, 0))]
+ic = InternalCoordinates(atoms)
+
+# Get bond lengths and angles
+print(f"O-H bond 1: {ic.bond_length(0, 1):.4f} Å")
+print(f"O-H bond 2: {ic.bond_length(0, 2):.4f} Å")
+print(f"H-O-H angle: {ic.bond_angle(1, 0, 2):.2f}°")
+
+# Wilson B-matrix (dq/dx)
+B = ic.wilson_b_matrix()
+```
+
+#### Frequency Analysis
+
+Compute harmonic vibrational frequencies from Hessian.
+
+```python
+from cm.qm.integrals import (
+    kohn_sham, compute_hessian, harmonic_frequencies,
+    FrequencyResult, HessianResult
+)
+
+# First optimize geometry, then compute Hessian
+dft = kohn_sham(optimized_atoms, functional='B3LYP', basis='6-31G*')
+hessian = compute_hessian(dft, optimized_atoms)
+
+# Compute frequencies
+freq = harmonic_frequencies(hessian, optimized_atoms)
+
+print(f"Frequencies (cm⁻¹):")
+for i, f in enumerate(freq.frequencies):
+    if f > 0:
+        print(f"  Mode {i+1}: {f:.1f} cm⁻¹")
+    else:
+        print(f"  Mode {i+1}: {abs(f):.1f}i cm⁻¹")  # Imaginary
+
+print(f"Zero-point energy: {freq.zpe:.6f} Hartree")
+print(f"                   {freq.zpe * 627.5:.2f} kcal/mol")
+
+# Access normal modes and IR intensities
+modes = freq.normal_modes      # (3N, 3N-6) array
+ir = freq.ir_intensities       # km/mol
+```
+
+#### Thermochemistry
+
+Calculate thermodynamic properties from frequencies.
+
+```python
+from cm.qm.integrals import thermochemistry, ThermochemistryResult
+
+# Compute thermochemistry at 298.15 K, 1 atm
+thermo = thermochemistry(
+    freq_result,
+    temperature=298.15,  # K
+    pressure=1.0         # atm
+)
+
+thermo.print_summary()
+
+# Access individual contributions
+print(f"Electronic energy: {thermo.E_elec:.6f} Hartree")
+print(f"Zero-point energy: {thermo.ZPE:.6f} Hartree")
+print(f"Thermal correction to enthalpy: {thermo.H_corr:.6f} Hartree")
+print(f"Thermal correction to Gibbs energy: {thermo.G_corr:.6f} Hartree")
+print(f"")
+print(f"Total enthalpy (H): {thermo.H_total:.6f} Hartree")
+print(f"Total Gibbs energy (G): {thermo.G_total:.6f} Hartree")
+print(f"Entropy (S): {thermo.S:.6f} cal/(mol·K)")
+```
+
+#### TDDFT Excited States
+
+Compute excited states using linear-response TDDFT.
+
+```python
+from cm.qm.integrals import kohn_sham, tddft, tda, TDDFTResult
+
+# Ground state DFT
+dft = kohn_sham(atoms, functional='B3LYP', basis='6-31G*')
+
+# Full TDDFT (includes B matrix)
+excited = tddft(dft, n_states=10)
+excited.print_summary()
+
+# Or use TDA (Tamm-Dancoff Approximation, faster)
+excited_tda = tda(dft, n_states=10)
+
+# Access results
+for i in range(excited.n_states):
+    E_eV = excited.excitation_energies[i]
+    f = excited.oscillator_strengths[i]
+    wavelength = 1240.0 / E_eV  # nm
+
+    print(f"S{i+1}: {E_eV:.2f} eV ({wavelength:.0f} nm), f = {f:.4f}")
+
+# Access transition dipoles and amplitudes
+mu = excited.transition_dipoles  # (n_states, 3)
+X = excited.X_amplitudes         # (n_states, n_occ, n_virt)
+Y = excited.Y_amplitudes         # (n_states, n_occ, n_virt)
+```
+
+#### PCM Solvation
+
+Compute solvation energies using the Polarizable Continuum Model.
+
+```python
+from cm.qm.integrals import (
+    kohn_sham, PCMSolver, compute_solvation_energy, build_cavity, PCMResult
+)
+
+# Ground state DFT calculation
+dft = kohn_sham(atoms, functional='B3LYP', basis='6-31G*')
+
+# Simple interface
+solv = compute_solvation_energy(dft, solvent='water')
+solv.print_summary()
+
+print(f"Solvation energy: {solv.solvation_energy:.6f} Hartree")
+print(f"                  {solv.solvation_energy_kcal:.2f} kcal/mol")
+
+# Full solver with custom settings
+pcm = PCMSolver(
+    solvent='acetonitrile',  # or epsilon=35.94
+    scaling_factor=1.2,       # Cavity radius scaling
+    n_points_per_atom=60      # Surface discretization
+)
+result = pcm.compute(dft)
+
+# Available solvents
+solvents = ['water', 'methanol', 'ethanol', 'acetonitrile', 'dmso',
+            'chloroform', 'dichloromethane', 'thf', 'toluene', 'hexane',
+            'benzene', 'acetone', 'dmf', 'diethylether']
+```
+
+#### Dipole Moments
+
+Calculate molecular dipole moments.
+
+```python
+from cm.qm.integrals import kohn_sham, dipole_moment, DipoleResult
+
+dft = kohn_sham(atoms, functional='B3LYP', basis='6-31G*')
+dipole = dipole_moment(dft, verbose=True)
+
+print(f"Dipole moment: {dipole.magnitude:.4f} Debye")
+print(f"Components (Debye): X={dipole.dipole[0]:.4f}, "
+      f"Y={dipole.dipole[1]:.4f}, Z={dipole.dipole[2]:.4f}")
+
+# Access electronic and nuclear contributions
+print(f"Electronic: {dipole.dipole_electronic}")
+print(f"Nuclear: {dipole.dipole_nuclear}")
+```
+
+#### Polarizability
+
+Calculate static polarizability tensor.
+
+```python
+from cm.qm.integrals import (
+    kohn_sham, static_polarizability, PolarizabilityResult, PolarizabilityCalculator
+)
+
+# From converged result (sum-over-states)
+dft = kohn_sham(atoms, functional='B3LYP', basis='6-31G*')
+pol = static_polarizability(dft)
+pol.print_summary()
+
+print(f"Isotropic polarizability: {pol.isotropic:.4f} a.u.")
+print(f"                          {pol.isotropic_angstrom:.4f} ų")
+print(f"Anisotropy: {pol.anisotropy:.4f} a.u.")
+
+# Finite field method (more accurate)
+calc = PolarizabilityCalculator(
+    method='B3LYP',
+    basis='6-31G*',
+    field_strength=0.001
+)
+pol = calc.compute(atoms)
+```
+
+#### Effective Core Potentials (ECPs)
+
+Use ECPs for transition metals.
+
+```python
+from cm.qm.integrals.basis.ecp import get_ecp, ECPPotential, LANL2DZ_ECP
+
+# Get LANL2DZ ECP for iron
+fe_ecp = get_ecp('Fe', 'LANL2DZ')
+print(f"Element: {fe_ecp.element}")
+print(f"Core electrons replaced: {fe_ecp.n_core}")
+print(f"Max angular momentum: {fe_ecp.lmax}")
+
+# Available ECPs: Fe, Cu, Zn, Ni, Co, Mn
+available_metals = list(LANL2DZ_ECP.keys())
 ```
 
 #### Complete Example: H₂ Energy Curve

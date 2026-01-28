@@ -15,9 +15,9 @@ import numpy as np
 import math
 from typing import Tuple, List
 
-from .basis import GaussianPrimitive, ContractedGaussian, BasisFunction, BasisSet
-from .boys import boys_function
-from .nuclear import _E_coefficients
+from ..basis import GaussianPrimitive, ContractedGaussian, BasisFunction, BasisSet
+from ..utils.boys import boys_function
+from ..one_electron.nuclear import _E_coefficients
 
 
 def _R_coefficients_eri(t: int, u: int, v: int, n: int, p: float,

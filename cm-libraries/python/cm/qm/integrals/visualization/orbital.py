@@ -14,7 +14,7 @@ import numpy as np
 from typing import List, Tuple, Optional, Union
 from dataclasses import dataclass
 
-from .basis import BasisSet, BasisFunction, ContractedGaussian, GaussianPrimitive
+from ..basis import BasisSet, BasisFunction, ContractedGaussian, GaussianPrimitive
 
 
 @dataclass

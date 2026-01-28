@@ -19,11 +19,9 @@ import math
 from typing import List, Tuple, Optional
 from dataclasses import dataclass
 
-from .basis import BasisSet, BasisFunction
-from .overlap import overlap_matrix
-from .kinetic import kinetic_matrix
-from .nuclear import nuclear_attraction_matrix
-from .eri import eri_tensor, compute_J_matrix, compute_K_matrix
+from ..basis import BasisSet, BasisFunction
+from ..one_electron import overlap_matrix, kinetic_matrix, nuclear_attraction_matrix
+from ..two_electron import eri_tensor, compute_J_matrix, compute_K_matrix
 
 
 @dataclass

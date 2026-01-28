@@ -15,7 +15,7 @@ import math
 from typing import Tuple, List, Optional
 from functools import lru_cache
 
-from .basis import GaussianPrimitive, ContractedGaussian, BasisFunction, BasisSet
+from ..basis import GaussianPrimitive, ContractedGaussian, BasisFunction, BasisSet
 
 
 def overlap_1d(i: int, j: int, PA: float, alpha: float, beta: float) -> float:

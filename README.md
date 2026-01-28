@@ -6,8 +6,14 @@ Chemical Machines provides researchers and developers with a containerized envir
 
 ## Key Features
 
-- **GPU-accelerated quantum mechanics** - Hartree-Fock and CCSD(T) calculations with CUDA support
-- **Publication-quality basis sets** - STO-3G (teaching), cc-pVTZ (publication), cc-pVQZ (benchmark)
+- **GPU-accelerated quantum mechanics** - Hartree-Fock, DFT, MP2, and CCSD(T) calculations with CUDA support
+- **Publication-quality basis sets** - STO-3G, 3-21G, 6-31G*, cc-pVDZ/TZ/QZ with ECP support for transition metals
+- **DFT with modern functionals** - LDA (SVWN5), GGA (BLYP, PBE), hybrid (B3LYP, PBE0, M06), range-separated (CAM-B3LYP, ωB97X-D)
+- **Geometry optimization** - BFGS optimizer with internal coordinates and transition state search
+- **Vibrational analysis** - Harmonic frequencies, thermochemistry (ZPE, enthalpy, Gibbs energy)
+- **Excited states** - TDDFT linear response and Tamm-Dancoff approximation
+- **Solvation models** - PCM implicit solvation with 14+ solvents
+- **Molecular properties** - Dipole moments, polarizability, oscillator strengths
 - **Symbolic mathematics** - 50+ special functions including Bessel, Legendre, Hermite polynomials, and spherical harmonics
 - **Interactive notebook interface** - Jupyter-like experience with persistent Python kernels and drag-and-drop cells
 - **Integrated molecular databases** - 134k+ molecules from NIST CCCBDB, PubChem, and QM9 datasets
@@ -30,9 +36,16 @@ Chemical Machines addresses the following research problems in computational che
 
 The platform employs the following computational approaches:
 
-- **Electronic structure**: Hartree-Fock (RHF) and CCSD(T) coupled cluster with Gaussian-type orbital basis functions
-- **Basis sets**: STO-3G (minimal), cc-pVTZ (triple-zeta), cc-pVQZ (quadruple-zeta with g functions)
+- **Electronic structure**: Hartree-Fock (RHF, UHF), Kohn-Sham DFT, MP2, and CCSD(T) coupled cluster
+- **DFT functionals**: LDA (SVWN5), GGA (BLYP, PBE), meta-GGA, hybrid (B3LYP, PBE0, M06-2X), range-separated (CAM-B3LYP, ωB97X-D, ωB97M-V)
+- **Basis sets**: STO-3G, 3-21G, 6-31G/6-31G*/6-31G**, cc-pVDZ/TZ/QZ with ECP support (LANL2DZ)
 - **Integral evaluation**: McMurchie-Davidson scheme with Schwarz screening and 8-fold permutation symmetry
+- **Analytic gradients**: HF and DFT gradients for geometry optimization
+- **Geometry optimization**: BFGS quasi-Newton, internal coordinates with Wilson B-matrix, transition state search via eigenvector-following
+- **Vibrational analysis**: Harmonic frequencies, IR intensities, thermochemistry (ZPE, enthalpy, entropy, Gibbs energy)
+- **Excited states**: Linear-response TDDFT and Tamm-Dancoff approximation (TDA)
+- **Solvation**: PCM (Polarizable Continuum Model) with 14+ solvents
+- **Properties**: Dipole moments, static polarizability, oscillator strengths, transition dipoles
 - **Special functions**: Direct numerical integration and series expansion for Bessel functions, orthogonal polynomials, and spherical harmonics
 - **GPU acceleration**: PyTorch/CUDA acceleration for two-electron integrals and tensor operations
 - **Database queries**: Elasticsearch-backed full-text and property-based search across 134,000+ molecular structures
@@ -41,6 +54,7 @@ The platform employs the following computational approaches:
 | Method | Basis | Typical Accuracy | Use Case |
 |--------|-------|------------------|----------|
 | RHF | STO-3G | ~85% correlation | Teaching, qualitative |
+| B3LYP | 6-31G* | ~90% accuracy | Routine DFT |
 | RHF | cc-pVTZ | ~95% correlation | Publication quality |
 | CCSD(T) | cc-pVQZ | ~99% correlation | Benchmark accuracy |
 
@@ -105,14 +119,21 @@ Quantum mechanics toolkit for atomic and molecular calculations.
 
 ### cm.qm.integrals
 
-Ab initio quantum chemistry module for molecular integral evaluation and electronic structure calculations.
+Ab initio quantum chemistry module for molecular integral evaluation and electronic structure calculations. Organized into modular subdirectories:
 
-- **Basis sets**: STO-3G, cc-pVTZ, cc-pVQZ with s, p, d, f, g angular momentum functions
-- **One-electron integrals**: Overlap (S), kinetic energy (T), nuclear attraction (V)
-- **Two-electron integrals**: Electron repulsion (ERI) with Schwarz screening and 8-fold symmetry
-- **Hartree-Fock**: Restricted Hartree-Fock (RHF) solver with DIIS acceleration
-- **Coupled cluster**: Full CCSD with perturbative triples (T) correction
-- **Visualization**: Molecular orbital isosurface extraction via marching cubes
+- **basis/**: Basis set definitions (STO-3G, 3-21G, 6-31G*, cc-pVDZ/TZ/QZ) with s, p, d, f, g angular momentum functions
+- **basis/ecp/**: Effective core potentials (LANL2DZ) for transition metals (Fe, Cu, Zn, Ni, Co, Mn)
+- **one_electron/**: Overlap (S), kinetic energy (T), nuclear attraction (V) integrals
+- **two_electron/**: Electron repulsion integrals (ERI) with Schwarz screening and 8-fold symmetry
+- **methods/**: RHF, UHF, Kohn-Sham DFT, MP2, CCSD(T)
+- **dft/**: Numerical grids (Lebedev, Becke), XC functionals (LDA, GGA, hybrid, range-separated)
+- **gradients/**: Analytic HF and DFT gradients
+- **optimization/**: BFGS geometry optimizer, internal coordinates, transition state search
+- **properties/**: Hessian, harmonic frequencies, thermochemistry, dipole moments, polarizability
+- **tddft/**: Linear-response TDDFT and TDA for excited states
+- **solvation/**: PCM implicit solvation model
+- **visualization/**: Molecular orbital isosurface extraction via marching cubes
+- **utils/**: Helper functions (Boys function for Coulomb integrals)
 
 ### cm.data
 
@@ -286,6 +307,78 @@ For benchmark-quality results, use cc-pVQZ basis which includes g-type polarizat
 hf_pvqz = hartree_fock(nuclei, basis="cc-pVQZ", n_electrons=2)
 ccsd_pvqz = ccsd(hf_pvqz)
 print(f"CCSD(T)/cc-pVQZ: {ccsd_pvqz.energy_total:.6f} Hartree")
+```
+
+### Workflow 6: DFT Geometry Optimization and Frequencies
+
+This example demonstrates a complete DFT workflow with geometry optimization, frequency calculation, and thermochemistry.
+
+```python
+from cm.qm.integrals import (
+    kohn_sham, optimize_geometry, harmonic_frequencies, thermochemistry,
+    compute_solvation_energy
+)
+
+# Initial water geometry (slightly distorted)
+atoms = [
+    ('O', (0.0, 0.0, 0.0)),
+    ('H', (1.0, 0.0, 0.0)),
+    ('H', (-0.3, 0.9, 0.0))
+]
+
+# Geometry optimization with B3LYP/6-31G*
+opt_result = optimize_geometry(
+    atoms,
+    method='B3LYP',
+    basis='6-31G*',
+    convergence={'gradient': 1e-4, 'energy': 1e-6}
+)
+print(f"Optimized energy: {opt_result.energy:.6f} Hartree")
+print(f"Converged in {opt_result.n_iterations} steps")
+
+# Frequency calculation at optimized geometry
+freq_result = harmonic_frequencies(opt_result.final_result, opt_result.atoms)
+print(f"Frequencies (cm⁻¹): {freq_result.frequencies}")
+print(f"Zero-point energy: {freq_result.zpe * 627.5:.2f} kcal/mol")
+
+# Thermochemistry at 298.15 K
+thermo = thermochemistry(freq_result, temperature=298.15)
+thermo.print_summary()
+
+# Solvation in water
+dft_result = kohn_sham(opt_result.atoms, functional='B3LYP', basis='6-31G*')
+solv = compute_solvation_energy(dft_result, solvent='water')
+print(f"Solvation free energy: {solv.solvation_energy_kcal:.2f} kcal/mol")
+```
+
+### Workflow 7: Excited States with TDDFT
+
+This example demonstrates computing UV-Vis absorption spectra using TDDFT.
+
+```python
+from cm.qm.integrals import kohn_sham, tddft
+
+# Formaldehyde molecule
+atoms = [
+    ('C', (0.0, 0.0, 0.0)),
+    ('O', (1.2, 0.0, 0.0)),
+    ('H', (-0.6, 0.9, 0.0)),
+    ('H', (-0.6, -0.9, 0.0))
+]
+
+# Ground state DFT
+dft = kohn_sham(atoms, functional='B3LYP', basis='6-31G*')
+
+# Compute 10 lowest excited states
+excited = tddft(dft, n_states=10)
+excited.print_summary()
+
+# Access excitation energies and oscillator strengths
+for i in range(excited.n_states):
+    E_eV = excited.excitation_energies[i]
+    f = excited.oscillator_strengths[i]
+    wavelength = 1240 / E_eV  # Convert to nm
+    print(f"S{i+1}: {E_eV:.2f} eV ({wavelength:.0f} nm), f = {f:.4f}")
 ```
 
 ## Architecture
@@ -506,9 +599,22 @@ chemical-machines/
 ├── cm-libraries/           # Python scientific libraries
 │   └── python/cm/
 │       ├── symbols/        # Symbolic math (core.py, functions.py, special.py)
-│       ├── qm/            # Quantum mechanics (atoms.py, hamiltonian.py, etc.)
-│       ├── data/          # Benchmark database API (benchmark.py)
-│       └── views/         # Visualization (visualization.py, output.py)
+│       ├── qm/             # Quantum mechanics (atoms.py, hamiltonian.py, etc.)
+│       │   └── integrals/  # Ab initio quantum chemistry module
+│       │       ├── basis/          # Basis sets (STO-3G, 6-31G*, cc-pVXZ) and ECPs
+│       │       ├── one_electron/   # Overlap, kinetic, nuclear integrals
+│       │       ├── two_electron/   # Electron repulsion integrals (ERI)
+│       │       ├── methods/        # HF, UHF, DFT, MP2, CCSD(T)
+│       │       ├── dft/            # Grids and XC functionals
+│       │       ├── gradients/      # Analytic HF/DFT gradients
+│       │       ├── optimization/   # Geometry optimization, TS search
+│       │       ├── properties/     # Frequencies, thermochemistry, dipole
+│       │       ├── tddft/          # Excited states (TDDFT/TDA)
+│       │       ├── solvation/      # PCM implicit solvation
+│       │       ├── visualization/  # Orbital isosurface rendering
+│       │       └── utils/          # Helper functions (Boys function)
+│       ├── data/           # Benchmark database API (benchmark.py)
+│       └── views/          # Visualization (visualization.py, output.py)
 ├── scripts/               # Utility scripts (autocomplete generation, etc.)
 ├── docker/               # Container configuration
 │   ├── Dockerfile        # Production image
@@ -590,11 +696,13 @@ Contributions to Chemical Machines are welcome. The project prioritizes scientif
 
 ### Areas for Contribution
 
-- **Basis sets**: Add support for additional Gaussian basis sets (6-31G*, aug-cc-pVTZ, def2-TZVP)
-- **Methods**: Implement MP2, CASSCF, DFT exchange-correlation functionals
-- **Integral acceleration**: Further GPU optimization, Cholesky decomposition for ERI
-- **Special functions**: Expand coverage of mathematical special functions
-- **Visualization**: Enhanced orbital rendering, electron density plots
+- **Basis sets**: Add support for additional Gaussian basis sets (aug-cc-pVTZ, def2-TZVP, def2-QZVP)
+- **Methods**: Implement CASSCF, CASPT2, ADC(2) for multireference systems
+- **DFT functionals**: Add meta-GGA (TPSS, SCAN), double-hybrid functionals
+- **Integral acceleration**: Further GPU optimization, Cholesky decomposition for ERI, RI-J/RI-K
+- **Dispersion corrections**: DFT-D3 with BJ damping
+- **NMR properties**: Chemical shifts via GIAO method
+- **Visualization**: Enhanced orbital rendering, electron density plots, NCI analysis
 - **Database integration**: Additional benchmark data sources
 - **Documentation**: Examples, tutorials, API documentation
 

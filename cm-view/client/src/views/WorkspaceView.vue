@@ -17,13 +17,12 @@
         </div>
         <div class="header-actions">
           <button @click="showProfileDialog = true" class="profile-btn" :title="activeProfile ? activeProfile.name : 'Profile'">
-            <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
-              <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
-            </svg>
+            <User :size="16" />
             <span class="profile-indicator" v-if="activeProfile"></span>
           </button>
           <button @click="sidebarOpen = !sidebarOpen" class="toggle-btn">
-            {{ sidebarOpen ? '◀' : '▶' }}
+            <PanelLeftClose v-if="sidebarOpen" :size="14" />
+            <PanelLeftOpen v-else :size="14" />
           </button>
         </div>
       </div>
@@ -77,26 +76,26 @@
               </div>
               <div class="env-meta">
                 <span class="pkg-count clickable" @click.stop="openEnvDetail(env, 'python')">
-                  <svg class="pkg-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+                  <Package class="pkg-icon" :size="12" />
                   {{ env.packageCount }} packages
                 </span>
                 <button
                   v-if="!env.isBase && env.name !== 'base'"
                   @click.stop="deleteEnvironment(env.name)"
-                  class="delete-env-btn"
+                  class="btn-icon delete-env-btn"
                   title="Delete environment"
-                >&times;</button>
+                ><X :size="12" /></button>
               </div>
             </div>
           </div>
 
           <div class="new-env-section">
-            <button @click="showCreateDialog = true" class="create-env-btn">
-              + New Python Env
+            <button @click="showCreateDialog = true" class="btn-secondary create-env-btn">
+              <Plus :size="12" /> New Python Env
             </button>
           </div>
 
-          <button @click="loadEnvironments" class="refresh-btn">Refresh</button>
+          <button @click="loadEnvironments" class="btn-secondary refresh-btn">Refresh</button>
         </template>
 
         <!-- C++ Environments -->
@@ -127,21 +126,21 @@
               </div>
               <div class="env-meta">
                 <span class="pkg-count clickable" @click.stop="openEnvDetail(env, 'cpp')">
-                  <svg class="pkg-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M20 7h-4V4c0-1.1-.9-2-2-2h-4c-1.1 0-2 .9-2 2v3H4c-1.1 0-2 .9-2 2v11c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V9c0-1.1-.9-2-2-2zM10 4h4v3h-4V4zm1 13v-3H8v-2h3V9h2v3h3v2h-3v3h-2z"/></svg>
+                  <Package class="pkg-icon" :size="12" />
                   {{ env.packages?.length || 0 }} packages
                 </span>
                 <button
                   @click.stop="deleteCppEnvironment(env.name)"
-                  class="delete-env-btn"
+                  class="btn-icon delete-env-btn"
                   title="Delete environment"
-                >&times;</button>
+                ><X :size="12" /></button>
               </div>
             </div>
           </div>
 
           <div class="new-env-section">
-            <button @click="showCppDialog = true" class="create-env-btn">
-              + New C++ Env
+            <button @click="showCppDialog = true" class="btn-secondary create-env-btn">
+              <Plus :size="12" /> New C++ Env
             </button>
           </div>
 
@@ -173,20 +172,20 @@
                 <span class="pkg-count">{{ env.installations?.length || 0 }} installs</span>
                 <button
                   @click.stop="deleteVendorEnvironment(env.name)"
-                  class="delete-env-btn"
+                  class="btn-icon delete-env-btn"
                   title="Delete environment"
-                >&times;</button>
+                ><X :size="12" /></button>
               </div>
             </div>
           </div>
 
           <div class="new-env-section">
-            <button @click="showVendorDialog = true" class="create-env-btn vendor-btn">
-              + Build from Source
+            <button @click="showVendorDialog = true" class="btn-secondary create-env-btn vendor-btn">
+              <Plus :size="12" /> Build from Source
             </button>
           </div>
 
-          <button @click="loadCppEnvironments(); loadVendorEnvironments()" class="refresh-btn">Refresh</button>
+          <button @click="loadCppEnvironments(); loadVendorEnvironments()" class="btn-secondary refresh-btn">Refresh</button>
         </template>
       </div>
     </div>
@@ -196,32 +195,21 @@
 
     <!-- Main Content -->
     <div class="main-content">
-      <!-- Top Panel: WebGL Visualization -->
-      <div class="visualizer-panel" :style="visualizerPanelStyle">
-        <MainWebGLPanel
-          :html-content="webglContent"
-          :height="visualizerHeight"
-          @refresh="refreshWebGL"
-          @update:expanded="webglExpanded = $event"
-        />
-      </div>
-
-      <!-- Resize Handle (Horizontal) - hidden when WebGL is collapsed -->
-      <div v-if="webglExpanded" class="resize-handle-h" @pointerdown="startResize"></div>
-
-      <!-- Bottom Panel: Code Cells / Terminal -->
+      <!-- Code Cells / Terminal -->
       <div class="notebook-panel">
         <!-- Mode Toggle Bar -->
         <div class="mode-toggle-bar">
+          <button class="home-btn" @click="router.push('/')" title="Back to workspaces">
+            <Home :size="14" />
+            <span class="home-label">Home</span>
+          </button>
           <div class="mode-tabs">
             <button
               :class="{ active: bottomPanelMode === 'editor' }"
               @click="bottomPanelMode = 'editor'"
               title="Code Editor"
             >
-              <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
-                <path d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/>
-              </svg>
+              <Code :size="14" />
               Editor
             </button>
             <button
@@ -229,44 +217,22 @@
               @click="bottomPanelMode = 'terminal'; $nextTick(() => terminalRef?.focus())"
               title="Terminal"
             >
-              <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
-                <path d="M20 19V7H4v12h16m0-16a2 2 0 012 2v14a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h16m-7 14v-2h5v2h-5m-3.42-4L5.57 9H8.4l3.3 3.3c.39.39.39 1.03 0 1.42L8.42 17H5.59l4-4z"/>
-              </svg>
+              <TerminalSquare :size="14" />
               Terminal
             </button>
           </div>
-          <!-- File tabs (only shown in editor mode) -->
-          <div class="tab-bar" v-if="bottomPanelMode === 'editor' && openTabs.length > 0">
-            <div
-              v-for="(tab, index) in openTabs"
-              :key="tab.path"
-              class="tab"
-              :class="{ active: index === activeTabIndex, dirty: tab.isDirty }"
-              @click="switchToTab(index)"
-              :title="tab.path"
-            >
-              <span class="tab-icon">{{ getFileIcon(tab.name) }}</span>
-              <span class="tab-name">{{ tab.name }}</span>
-              <span v-if="tab.isDirty" class="tab-dirty-indicator">●</span>
-              <button class="tab-close" @click.stop="closeTab(index)" title="Close">×</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Editor View -->
-        <template v-if="bottomPanelMode === 'editor'">
-        <div class="panel-header">
-          <div class="file-info" v-if="currentFile">
-            <span class="file-name" :class="{ modified: hasUnsavedChanges }">
-              {{ currentFile.name }}{{ hasUnsavedChanges ? ' •' : '' }}
-            </span>
-            <span class="file-path">{{ currentFile.path }}</span>
-          </div>
-          <div class="file-info" v-else>
-            <span class="file-name empty">No file open</span>
-            <span class="file-path">Open a file from the sidebar</span>
-          </div>
-          <div class="header-right">
+          <!-- Split toggle (only in editor mode) -->
+          <button
+            v-if="bottomPanelMode === 'editor'"
+            class="split-toggle-btn"
+            @click="handleSplit"
+            :title="splitDirection ? 'Unsplit editor' : 'Split editor'"
+          >
+            <Columns2 :size="12" />
+          </button>
+          <div class="toolbar-spacer"></div>
+          <!-- Editor controls (only shown in editor mode) -->
+          <div class="toolbar-actions" v-if="bottomPanelMode === 'editor'">
             <!-- Python environment selector -->
             <select
               v-if="currentFile && currentFile.language === 'python'"
@@ -327,47 +293,54 @@
               :class="{ active: markdownPreviewMode }"
               :title="markdownPreviewMode ? 'Edit markdown' : 'Preview markdown'"
             >
-              {{ markdownPreviewMode ? '✏️ Edit' : '👁️ Preview' }}
+              <Pencil v-if="markdownPreviewMode" :size="12" />
+              <Eye v-else :size="12" />
             </button>
             <button v-if="currentFile" @click="saveFile" class="save-btn" :disabled="!hasUnsavedChanges" title="Save file (Ctrl+S)">
-              Save
+              <Save :size="12" />
             </button>
-            <button v-if="currentFile && currentUseCells && !isMarkdownFile" @click="addCell" title="Add new cell">+ Cell</button>
-            <button v-if="currentFile" @click="closeFile" class="close-btn" title="Close file">×</button>
+            <button v-if="currentFile && currentUseCells && !isMarkdownFile" @click="addCell" class="toolbar-btn" title="Add new cell">
+              <Plus :size="12" />
+            </button>
+            <button v-if="currentFile" @click="closeFile" class="close-btn" title="Close file"><X :size="12" /></button>
           </div>
         </div>
 
-        <!-- Markdown Preview -->
+        <!-- Editor View -->
+        <template v-if="bottomPanelMode === 'editor'">
         <div
-          class="markdown-preview"
-          v-if="isMarkdownFile && markdownPreviewMode"
-          v-html="renderedMarkdown"
-          ref="markdownPreviewRef"
-          @click="handleMarkdownClick"
-        ></div>
-
-        <!-- Code Cells (hidden when markdown preview is active) -->
-        <div class="cells" v-else-if="currentFile && cells.length > 0">
-          <CodeCell
-            v-for="(cell, index) in cells"
-            :key="cell.id"
-            :cell="cell"
-            :index="index"
-            :language="currentFile.language"
-            :html-output="htmlOutputs[index] || ''"
-            @update="updateCell(index, $event)"
-            @run="executeCell(index)"
-            @delete="deleteCell(index)"
-            @create-below="createCellBelow(index)"
-            @reorder="reorderCells"
-            @interrupt="interruptCell(index)"
-          />
-        </div>
-        <div class="no-file-message" v-else-if="!currentFile">
-          <p>Open a file from the Files sidebar to start editing</p>
-          <p class="hint">Use <code># %%</code> in <code>.cell.py</code> / <code>.sh</code> or <code>// %%</code> in <code>.cell.cpp</code> for cell boundaries</p>
-          <p class="hint">Regular <code>.py</code> and <code>.cpp/.c/.h/.hpp</code> files are single execution units</p>
-          <p class="hint">Import workspace modules with <code>from workspace import module</code></p>
+          class="editor-groups-container"
+          :class="{
+            'split-h': splitDirection === 'horizontal',
+            'split-v': splitDirection === 'vertical'
+          }"
+        >
+          <template v-for="(group, gIdx) in editorGroups" :key="group.id">
+            <!-- Split resize handle between groups -->
+            <div
+              v-if="gIdx > 0"
+              class="split-resize-handle"
+              :class="splitDirection === 'horizontal' ? 'handle-col' : 'handle-row'"
+              @pointerdown="startSplitResize"
+            ></div>
+            <EditorGroup
+              :group="group"
+              :group-index="gIdx"
+              :is-focused="gIdx === focusedGroupIndex"
+              :style="getGroupStyle(gIdx)"
+              @focus="focusedGroupIndex = gIdx"
+              @switch-tab="switchTabInGroup(gIdx, $event)"
+              @close-tab="closeTabInGroup(gIdx, $event)"
+              @split="handleSplit"
+              @update-cell="handleGroupCellUpdate(gIdx, $event)"
+              @run-cell="handleGroupCellRun(gIdx, $event)"
+              @delete-cell="handleGroupCellDelete(gIdx, $event)"
+              @create-cell-below="handleGroupCellCreateBelow(gIdx, $event)"
+              @reorder-cells="handleGroupCellReorder(gIdx, $event)"
+              @interrupt-cell="handleGroupCellInterrupt(gIdx, $event)"
+              @tab-drop-from-group="moveTabBetweenGroups($event.fromGroup, $event.fromTab, gIdx, $event.toTab)"
+            />
+          </template>
         </div>
         </template>
 
@@ -426,8 +399,8 @@
         </div>
 
         <div class="dialog-actions">
-          <button @click="showCreateDialog = false" class="cancel-btn" :disabled="isCreating">Cancel</button>
-          <button @click="createEnvironment" class="create-btn" :disabled="!newEnvName || isCreating">
+          <button @click="showCreateDialog = false" class="btn-secondary cancel-btn" :disabled="isCreating">Cancel</button>
+          <button @click="createEnvironment" class="btn-primary create-btn" :disabled="!newEnvName || isCreating">
             {{ isCreating ? 'Creating...' : 'Create' }}
           </button>
         </div>
@@ -480,16 +453,20 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
-import CodeCell from '../components/CodeCell.vue'
+import EditorGroup from '../components/EditorGroup.vue'
 import FileBrowser from '../components/FileBrowser.vue'
 import CppEnvironmentDialog from '../components/CppEnvironmentDialog.vue'
 import VendorEnvironmentDialog from '../components/VendorEnvironmentDialog.vue'
 import EnvironmentDetailDialog from '../components/EnvironmentDetailDialog.vue'
 import ProfileDialog from '../components/ProfileDialog.vue'
 import Terminal from '../components/Terminal.vue'
-import MainWebGLPanel from '../components/MainWebGLPanel.vue'
+import {
+  User, PanelLeftClose, PanelLeftOpen, Package, X, Plus, Home, Save,
+  Code, TerminalSquare, Eye, Pencil, Columns2
+} from 'lucide-vue-next'
+
 import { marked } from 'marked'
 
 // Helper to generate slug from text (for anchor IDs)
@@ -516,6 +493,7 @@ const renderer = {
 marked.use({ renderer, gfm: true })
 
 const route = useRoute()
+const router = useRouter()
 
 // Workspace ID from route
 const workspaceId = computed(() => route.params.id)
@@ -562,30 +540,7 @@ const sidebarTab = ref('files')
 const bottomPanelMode = ref('editor')
 const terminalRef = ref(null)
 const fileBrowserRef = ref(null)
-const markdownPreviewRef = ref(null)
 
-// WebGL main view state
-const webglContent = ref('')
-
-// Fetch WebGL content from .out/main.webgl.html
-async function fetchWebGLContent() {
-  try {
-    const response = await axios.get(outputApiUrl('main.webgl'))
-    if (response.data.exists && response.data.outputs.length > 0) {
-      webglContent.value = response.data.outputs[0]
-    } else {
-      webglContent.value = ''
-    }
-  } catch (error) {
-    console.error('Error fetching WebGL content:', error)
-    webglContent.value = ''
-  }
-}
-
-// Refresh WebGL content
-async function refreshWebGL() {
-  await fetchWebGLContent()
-}
 
 // Environment state (Python/Conda)
 const environments = ref([])
@@ -632,115 +587,71 @@ const isCreating = ref(false)
 const logOutput = ref(null)
 const dialogExpanded = ref(false)
 
-// File editor state - now with tabs
-const openTabs = ref([])  // Array of { path, name, language, cells, isDirty, htmlOutputs, isMarkdown, previewMode }
-const activeTabIndex = ref(-1)  // Currently active tab index
+// ================== Editor Groups (Split View) ==================
+let nextGroupId = 1
+const editorGroups = ref([
+  { id: 0, tabs: [], activeTabIndex: -1 }
+])
+const focusedGroupIndex = ref(0)
+const splitDirection = ref(null) // null | 'horizontal' | 'vertical'
+const splitRatio = ref(0.5)
 
-// Computed properties for current file
+// Convenience: focused group
+const focusedGroup = computed(() => editorGroups.value[focusedGroupIndex.value])
+
+// Helper to get the active tab from the focused group
+function _focusedTab() {
+  const g = focusedGroup.value
+  if (!g || g.activeTabIndex < 0 || g.activeTabIndex >= g.tabs.length) return null
+  return g.tabs[g.activeTabIndex]
+}
+
+// Legacy aliases so existing code keeps working
+const openTabs = computed(() => focusedGroup.value?.tabs || [])
+const activeTabIndex = computed({
+  get: () => focusedGroup.value?.activeTabIndex ?? -1,
+  set: (v) => { if (focusedGroup.value) focusedGroup.value.activeTabIndex = v }
+})
+
+// Computed properties for current file (reads from focused group)
 const currentFile = computed(() => {
-  if (activeTabIndex.value >= 0 && activeTabIndex.value < openTabs.value.length) {
-    const tab = openTabs.value[activeTabIndex.value]
-    return { path: tab.path, name: tab.name, language: tab.language }
-  }
-  return null
+  const tab = _focusedTab()
+  if (!tab) return null
+  return { path: tab.path, name: tab.name, language: tab.language }
 })
 
 const cells = computed({
-  get: () => {
-    if (activeTabIndex.value >= 0 && activeTabIndex.value < openTabs.value.length) {
-      return openTabs.value[activeTabIndex.value].cells
-    }
-    return []
-  },
+  get: () => _focusedTab()?.cells || [],
   set: (value) => {
-    if (activeTabIndex.value >= 0 && activeTabIndex.value < openTabs.value.length) {
-      openTabs.value[activeTabIndex.value].cells = value
-    }
+    const tab = _focusedTab()
+    if (tab) tab.cells = value
   }
 })
 
 const hasUnsavedChanges = computed({
-  get: () => {
-    if (activeTabIndex.value >= 0 && activeTabIndex.value < openTabs.value.length) {
-      return openTabs.value[activeTabIndex.value].isDirty
-    }
-    return false
-  },
+  get: () => _focusedTab()?.isDirty || false,
   set: (value) => {
-    if (activeTabIndex.value >= 0 && activeTabIndex.value < openTabs.value.length) {
-      openTabs.value[activeTabIndex.value].isDirty = value
-    }
+    const tab = _focusedTab()
+    if (tab) tab.isDirty = value
   }
 })
 
-// Whether the current file uses cell mode
-const currentUseCells = computed(() => {
-  if (activeTabIndex.value >= 0 && activeTabIndex.value < openTabs.value.length) {
-    return openTabs.value[activeTabIndex.value].useCells !== false
-  }
-  return true
-})
+const currentUseCells = computed(() => _focusedTab()?.useCells !== false)
 
-// Whether the current file is a markdown file
-const isMarkdownFile = computed(() => {
-  if (activeTabIndex.value >= 0 && activeTabIndex.value < openTabs.value.length) {
-    return openTabs.value[activeTabIndex.value].isMarkdown === true
-  }
-  return false
-})
+const isMarkdownFile = computed(() => _focusedTab()?.isMarkdown === true)
 
-// Whether markdown preview mode is active
 const markdownPreviewMode = computed({
-  get: () => {
-    if (activeTabIndex.value >= 0 && activeTabIndex.value < openTabs.value.length) {
-      return openTabs.value[activeTabIndex.value].previewMode === true
-    }
-    return false
-  },
+  get: () => _focusedTab()?.previewMode === true,
   set: (value) => {
-    if (activeTabIndex.value >= 0 && activeTabIndex.value < openTabs.value.length) {
-      openTabs.value[activeTabIndex.value].previewMode = value
-    }
+    const tab = _focusedTab()
+    if (tab) tab.previewMode = value
   }
 })
 
-// Rendered markdown HTML
-const renderedMarkdown = computed(() => {
-  if (!isMarkdownFile.value || !markdownPreviewMode.value) return ''
-  if (activeTabIndex.value >= 0 && activeTabIndex.value < openTabs.value.length) {
-    const content = openTabs.value[activeTabIndex.value].cells[0]?.content || ''
-    return marked(content)
-  }
-  return ''
-})
-
-// HTML outputs for current file's cells
-const htmlOutputs = computed(() => {
-  if (activeTabIndex.value >= 0 && activeTabIndex.value < openTabs.value.length) {
-    return openTabs.value[activeTabIndex.value].htmlOutputs || []
-  }
-  return []
-})
 
 // Sidebar state
 const sidebarWidth = ref(240)
 
-// Visualizer state
-const visualizerHeight = ref(400)
-const webglExpanded = ref(true)
-
-// Computed style for visualizer panel - collapses to header height when WebGL is collapsed
-const visualizerPanelStyle = computed(() => {
-  if (webglExpanded.value) {
-    return { height: visualizerHeight.value + 'px' }
-  } else {
-    // Collapsed: just show the header (~36px)
-    return { height: '36px', minHeight: '36px' }
-  }
-})
-
-// Resize handling
-let isResizing = false
 
 // ================== Environment Functions ==================
 
@@ -1271,103 +1182,198 @@ async function saveFile() {
 }
 
 /**
- * Close current file (closes active tab)
+ * Close current file (closes active tab in focused group)
  */
 function closeFile() {
   if (activeTabIndex.value >= 0) {
-    closeTab(activeTabIndex.value)
+    closeTabInGroup(focusedGroupIndex.value, activeTabIndex.value)
   }
 }
 
 /**
- * Switch to a specific tab
+ * Switch to a tab within a specific group
  */
-function switchToTab(index) {
-  if (index >= 0 && index < openTabs.value.length) {
-    // Save scroll position of current tab before switching
-    if (activeTabIndex.value >= 0 && activeTabIndex.value < openTabs.value.length) {
-      const currentTab = openTabs.value[activeTabIndex.value]
-      if (currentTab.isMarkdown && markdownPreviewRef.value) {
-        currentTab.scrollTop = markdownPreviewRef.value.scrollTop
-      }
-    }
-
-    activeTabIndex.value = index
-
-    // Restore scroll position of new tab after DOM updates
-    nextTick(() => {
-      const newTab = openTabs.value[index]
-      if (newTab.isMarkdown && markdownPreviewRef.value && newTab.scrollTop !== undefined) {
-        markdownPreviewRef.value.scrollTop = newTab.scrollTop
-      }
-    })
-  }
+function switchTabInGroup(groupIndex, index) {
+  const group = editorGroups.value[groupIndex]
+  if (!group || index < 0 || index >= group.tabs.length) return
+  group.activeTabIndex = index
+  focusedGroupIndex.value = groupIndex
 }
 
 /**
- * Handle clicks in markdown preview for anchor links
+ * Close a tab within a specific group
  */
-function handleMarkdownClick(event) {
-  const target = event.target.closest('a')
-  if (!target) return
+function closeTabInGroup(groupIndex, index) {
+  const group = editorGroups.value[groupIndex]
+  if (!group || index < 0 || index >= group.tabs.length) return
 
-  const href = target.getAttribute('href')
-  if (!href) return
-
-  // Handle anchor links (scroll to section)
-  if (href.startsWith('#')) {
-    event.preventDefault()
-    const id = href.slice(1)
-    const element = markdownPreviewRef.value?.querySelector(`[id="${id}"], [name="${id}"]`)
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    }
-  }
-  // External links open in new tab
-  else if (href.startsWith('http://') || href.startsWith('https://')) {
-    event.preventDefault()
-    window.open(href, '_blank', 'noopener,noreferrer')
-  }
-}
-
-/**
- * Close a specific tab
- */
-function closeTab(index) {
-  if (index < 0 || index >= openTabs.value.length) return
-
-  const tab = openTabs.value[index]
+  const tab = group.tabs[index]
   if (tab.isDirty) {
     if (!confirm(`"${tab.name}" has unsaved changes. Close anyway?`)) return
   }
 
-  openTabs.value.splice(index, 1)
+  group.tabs.splice(index, 1)
 
-  // Adjust active tab index
-  if (openTabs.value.length === 0) {
-    activeTabIndex.value = -1
-  } else if (index <= activeTabIndex.value) {
-    activeTabIndex.value = Math.max(0, activeTabIndex.value - 1)
+  if (group.tabs.length === 0) {
+    group.activeTabIndex = -1
+    // Auto-close empty split groups (keep at least 1)
+    if (editorGroups.value.length > 1) {
+      editorGroups.value.splice(groupIndex, 1)
+      splitDirection.value = null
+      focusedGroupIndex.value = 0
+    }
+  } else if (index <= group.activeTabIndex) {
+    group.activeTabIndex = Math.max(0, group.activeTabIndex - 1)
   }
 }
 
-/**
- * Get file icon based on extension
- */
-function getFileIcon(filename) {
-  const ext = filename.split('.').pop()?.toLowerCase()
-  switch (ext) {
-    case 'py': return '🐍'
-    case 'cpp':
-    case 'c':
-    case 'h':
-    case 'hpp': return '⚙'
-    case 'sh':
-    case 'bash': return '💻'
-    case 'json': return '{}'
-    case 'md': return '📄'
-    default: return '📄'
+// ================== Split Editor Functions ==================
+
+function splitEditor(direction) {
+  if (editorGroups.value.length >= 2) return
+  splitDirection.value = direction
+  editorGroups.value.push({ id: nextGroupId++, tabs: [], activeTabIndex: -1 })
+}
+
+function unsplitEditor() {
+  if (editorGroups.value.length <= 1) return
+  const secondary = editorGroups.value[1]
+  editorGroups.value[0].tabs.push(...secondary.tabs)
+  editorGroups.value.splice(1, 1)
+  splitDirection.value = null
+  focusedGroupIndex.value = 0
+}
+
+function handleSplit() {
+  if (editorGroups.value.length >= 2) {
+    unsplitEditor()
+  } else {
+    splitEditor('horizontal')
   }
+}
+
+function moveTabBetweenGroups(fromGroupIndex, fromTabIndex, toGroupIndex, toTabIndex) {
+  const fromGroup = editorGroups.value[fromGroupIndex]
+  if (!fromGroup || fromTabIndex < 0 || fromTabIndex >= fromGroup.tabs.length) return
+
+  const [tab] = fromGroup.tabs.splice(fromTabIndex, 1)
+
+  // Adjust source active index
+  if (fromGroup.tabs.length === 0) {
+    fromGroup.activeTabIndex = -1
+  } else if (fromTabIndex <= fromGroup.activeTabIndex) {
+    fromGroup.activeTabIndex = Math.max(0, fromGroup.activeTabIndex - 1)
+  }
+
+  const toGroup = editorGroups.value[toGroupIndex]
+  const insertAt = toTabIndex >= 0 ? Math.min(toTabIndex, toGroup.tabs.length) : toGroup.tabs.length
+  toGroup.tabs.splice(insertAt, 0, tab)
+  toGroup.activeTabIndex = insertAt
+  focusedGroupIndex.value = toGroupIndex
+
+  // Auto-close empty split groups
+  if (fromGroup.tabs.length === 0 && editorGroups.value.length > 1) {
+    const removeIdx = editorGroups.value.indexOf(fromGroup)
+    if (removeIdx >= 0) {
+      editorGroups.value.splice(removeIdx, 1)
+      splitDirection.value = null
+      focusedGroupIndex.value = 0
+    }
+  }
+}
+
+function getGroupStyle(groupIndex) {
+  if (editorGroups.value.length === 1) return { flex: '1' }
+  const ratio = groupIndex === 0 ? splitRatio.value : (1 - splitRatio.value)
+  return { flex: `0 0 ${ratio * 100}%` }
+}
+
+// ================== Split Resize ==================
+
+let isSplitResizing = false
+let splitResizeContainer = null
+
+function startSplitResize(e) {
+  e.preventDefault()
+  isSplitResizing = true
+  splitResizeContainer = e.target.parentElement
+
+  const overlay = document.createElement('div')
+  overlay.id = 'split-resize-overlay'
+  overlay.style.cssText = `
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 9999; cursor: ${splitDirection.value === 'horizontal' ? 'col-resize' : 'row-resize'};
+  `
+  document.body.appendChild(overlay)
+
+  document.addEventListener('pointermove', doSplitResize)
+  document.addEventListener('pointerup', stopSplitResize)
+  document.addEventListener('pointercancel', stopSplitResize)
+  document.body.style.userSelect = 'none'
+  document.body.style.cursor = splitDirection.value === 'horizontal' ? 'col-resize' : 'row-resize'
+}
+
+function doSplitResize(e) {
+  if (!isSplitResizing || !splitResizeContainer) return
+  e.preventDefault()
+  const rect = splitResizeContainer.getBoundingClientRect()
+  let ratio
+  if (splitDirection.value === 'horizontal') {
+    ratio = (e.clientX - rect.left) / rect.width
+  } else {
+    ratio = (e.clientY - rect.top) / rect.height
+  }
+  splitRatio.value = Math.max(0.15, Math.min(0.85, ratio))
+}
+
+function stopSplitResize() {
+  if (!isSplitResizing) return
+  isSplitResizing = false
+  splitResizeContainer = null
+
+  const overlay = document.getElementById('split-resize-overlay')
+  if (overlay && overlay.parentNode) {
+    overlay.parentNode.removeChild(overlay)
+  }
+
+  document.removeEventListener('pointermove', doSplitResize)
+  document.removeEventListener('pointerup', stopSplitResize)
+  document.removeEventListener('pointercancel', stopSplitResize)
+  document.body.style.userSelect = ''
+  document.body.style.cursor = ''
+}
+
+// ================== Group-aware Cell Handlers ==================
+// These route events from EditorGroup components to existing cell functions
+// by temporarily ensuring the correct group is focused.
+
+function _withGroup(groupIndex, fn) {
+  focusedGroupIndex.value = groupIndex
+  fn()
+}
+
+function handleGroupCellUpdate(groupIndex, { cellIndex, data }) {
+  _withGroup(groupIndex, () => updateCell(cellIndex, data))
+}
+
+function handleGroupCellRun(groupIndex, cellIndex) {
+  _withGroup(groupIndex, () => executeCell(cellIndex))
+}
+
+function handleGroupCellDelete(groupIndex, cellIndex) {
+  _withGroup(groupIndex, () => deleteCell(cellIndex))
+}
+
+function handleGroupCellCreateBelow(groupIndex, cellIndex) {
+  _withGroup(groupIndex, () => createCellBelow(cellIndex))
+}
+
+function handleGroupCellReorder(groupIndex, payload) {
+  _withGroup(groupIndex, () => reorderCells(payload))
+}
+
+function handleGroupCellInterrupt(groupIndex, cellIndex) {
+  _withGroup(groupIndex, () => interruptCell(cellIndex))
 }
 
 function addCell() {
@@ -1627,11 +1633,10 @@ async function executeCell(index) {
       if (cell.status === 'running') {
         cell.status = 'completed'
       }
-      // Refresh HTML outputs and WebGL content after execution completes
+      // Refresh HTML outputs after execution completes
       // Use setTimeout to allow the compute service to write the output file
       setTimeout(() => {
         refreshHtmlOutputs()
-        fetchWebGLContent()
       }, 500)
     }
 
@@ -1759,12 +1764,14 @@ async function openFile(file) {
     // Switch to editor mode when opening a file
     bottomPanelMode.value = 'editor'
 
-    // Check if file is already open in a tab
-    const existingIndex = openTabs.value.findIndex(tab => tab.path === file.path)
-    if (existingIndex >= 0) {
-      // Switch to existing tab
-      activeTabIndex.value = existingIndex
-      return
+    // Check if file is already open in any group
+    for (let g = 0; g < editorGroups.value.length; g++) {
+      const existingIndex = editorGroups.value[g].tabs.findIndex(tab => tab.path === file.path)
+      if (existingIndex >= 0) {
+        editorGroups.value[g].activeTabIndex = existingIndex
+        focusedGroupIndex.value = g
+        return
+      }
     }
 
     const response = await axios.get(fileApiUrl(file.path))
@@ -1797,96 +1804,27 @@ async function openFile(file) {
       // Check if this is a markdown file
       const isMarkdown = file.name.toLowerCase().endsWith('.md')
 
-      // Add new tab
-      openTabs.value.push({
+      // Add new tab to focused group
+      const group = focusedGroup.value
+      group.tabs.push({
         path: file.path,
         name: file.name,
         language,
         cells: fileCells,
         isDirty: false,
-        useCells,  // Track whether this file uses cell mode
-        htmlOutputs: fileHtmlOutputs,  // HTML outputs from .out/ directory
-        isMarkdown,  // Track if this is a markdown file
-        previewMode: isMarkdown  // Start in preview mode for markdown files
+        useCells,
+        htmlOutputs: fileHtmlOutputs,
+        isMarkdown,
+        previewMode: isMarkdown
       })
 
       // Switch to the new tab
-      activeTabIndex.value = openTabs.value.length - 1
+      group.activeTabIndex = group.tabs.length - 1
     }
   } catch (error) {
     console.error('Error opening file:', error)
     alert(`Failed to open file: ${error.response?.data?.error || error.message}`)
   }
-}
-
-// ================== Resize Panel Functions ==================
-
-// Resize overlay element (created on first resize to block iframe pointer events)
-let resizeOverlay = null
-
-function createResizeOverlay() {
-  if (resizeOverlay) return resizeOverlay
-  resizeOverlay = document.createElement('div')
-  resizeOverlay.style.cssText = `
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 9999;
-    cursor: row-resize;
-  `
-  return resizeOverlay
-}
-
-function startResize(e) {
-  e.preventDefault()
-  isResizing = true
-
-  // Add overlay to capture pointer events over iframes
-  const overlay = createResizeOverlay()
-  document.body.appendChild(overlay)
-
-  // Use pointer events for better cross-platform handling
-  document.addEventListener('pointermove', doResize)
-  document.addEventListener('pointerup', stopResize)
-  document.addEventListener('pointercancel', stopResize)
-  // Fallback: stop resize if window loses focus
-  window.addEventListener('blur', stopResize)
-  // Prevent text selection during resize
-  document.body.style.userSelect = 'none'
-  document.body.style.cursor = 'row-resize'
-}
-
-function doResize(e) {
-  if (!isResizing) return
-  e.preventDefault()
-
-  const container = document.querySelector('.main-content')
-  const containerRect = container.getBoundingClientRect()
-  const newHeight = e.clientY - containerRect.top
-
-  if (newHeight >= 200 && newHeight <= containerRect.height - 150) {
-    visualizerHeight.value = newHeight
-  }
-}
-
-function stopResize() {
-  if (!isResizing) return
-  isResizing = false
-
-  // Remove overlay
-  if (resizeOverlay && resizeOverlay.parentNode) {
-    resizeOverlay.parentNode.removeChild(resizeOverlay)
-  }
-
-  document.removeEventListener('pointermove', doResize)
-  document.removeEventListener('pointerup', stopResize)
-  document.removeEventListener('pointercancel', stopResize)
-  window.removeEventListener('blur', stopResize)
-  // Restore normal selection and cursor
-  document.body.style.userSelect = ''
-  document.body.style.cursor = ''
 }
 
 // ================== Sidebar Resize ==================
@@ -1959,6 +1897,26 @@ function handleKeydown(e) {
       saveFile()
     }
   }
+  // Ctrl+\ to toggle split horizontal, Ctrl+Shift+\ for vertical
+  if ((e.ctrlKey || e.metaKey) && e.key === '\\') {
+    e.preventDefault()
+    if (e.shiftKey) {
+      if (splitDirection.value === 'vertical') {
+        unsplitEditor()
+      } else if (splitDirection.value === 'horizontal') {
+        // Switch direction
+        splitDirection.value = 'vertical'
+      } else {
+        splitEditor('vertical')
+      }
+    } else {
+      if (splitDirection.value) {
+        unsplitEditor()
+      } else {
+        splitEditor('horizontal')
+      }
+    }
+  }
 }
 
 // ================== Lifecycle ==================
@@ -1971,7 +1929,6 @@ onMounted(async () => {
     loadVendorEnvironments(),
     loadCompilers(),
     loadProfile(),
-    fetchWebGLContent()
   ])
 
   // Add keyboard shortcut listener
@@ -1980,8 +1937,6 @@ onMounted(async () => {
 
 onUnmounted(() => {
   document.removeEventListener('keydown', handleKeydown)
-  // Ensure resize cleanup if component unmounts during resize
-  stopResize()
 })
 </script>
 
@@ -2213,8 +2168,8 @@ onUnmounted(() => {
 }
 
 .env-sub-tabs button.active {
-  background: var(--accent);
-  color: var(--bg-primary);
+  background: rgba(0, 212, 255, 0.1);
+  color: var(--accent);
   border-color: var(--accent);
 }
 
@@ -2265,9 +2220,9 @@ onUnmounted(() => {
 }
 
 .pkg-icon {
-  width: 12px;
-  height: 12px;
+  display: inline-flex;
   opacity: 0.7;
+  vertical-align: middle;
 }
 
 .pkg-count.clickable:hover .pkg-icon {
@@ -2288,8 +2243,8 @@ onUnmounted(() => {
 }
 
 .delete-env-btn:hover {
-  background: var(--error);
-  color: white;
+  background: rgba(255, 68, 68, 0.15);
+  color: var(--error);
 }
 
 .new-env-section {
@@ -2300,15 +2255,11 @@ onUnmounted(() => {
   width: 100%;
   padding: 0.5rem;
   font-size: 0.8rem;
-  background: var(--accent);
-  color: var(--bg-primary);
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
+  color: var(--accent);
 }
 
 .create-env-btn:hover {
-  opacity: 0.9;
+  background: var(--bg-tertiary);
 }
 
 .refresh-btn {
@@ -2335,92 +2286,6 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-/* Visualizer Panel (Top) */
-.visualizer-panel {
-  position: relative;
-  background: #0a0a12;
-  transition: height 0.2s ease;
-}
-
-.viewport {
-  width: 100%;
-  height: 100%;
-}
-
-.viz-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  padding: 0.75rem 1rem;
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  pointer-events: none;
-  background: linear-gradient(to bottom, rgba(0,0,0,0.5) 0%, transparent 100%);
-}
-
-.viz-controls {
-  display: flex;
-  gap: 0.5rem;
-  pointer-events: auto;
-}
-
-.viz-controls button {
-  font-size: 0.75rem;
-  padding: 0.35rem 0.6rem;
-  background: rgba(0, 212, 255, 0.2);
-  border: 1px solid rgba(0, 212, 255, 0.4);
-  color: #00d4ff;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.viz-controls button:hover {
-  background: rgba(0, 212, 255, 0.3);
-  border-color: #00d4ff;
-}
-
-.molecule-info {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0.25rem;
-}
-
-.molecule-name {
-  color: #00d4ff;
-  font-weight: 600;
-  font-size: 0.9rem;
-}
-
-.molecule-formula {
-  color: rgba(255, 255, 255, 0.7);
-  font-family: monospace;
-  font-size: 0.8rem;
-}
-
-.box-info {
-  position: absolute;
-  bottom: 0.75rem;
-  left: 1rem;
-  color: rgba(0, 212, 255, 0.6);
-  font-size: 0.75rem;
-  font-family: monospace;
-}
-
-/* Resize Handle (Horizontal) */
-.resize-handle-h {
-  height: 6px;
-  background: var(--border);
-  cursor: row-resize;
-  transition: background 0.2s;
-}
-
-.resize-handle-h:hover {
-  background: var(--accent);
-}
 
 /* Vertical resize handle for sidebar */
 .resize-handle-v {
@@ -2550,7 +2415,8 @@ onUnmounted(() => {
 }
 
 .tab-icon {
-  font-size: 0.9rem;
+  display: inline-flex;
+  align-items: center;
 }
 
 .tab-name {
@@ -2590,59 +2456,76 @@ onUnmounted(() => {
 }
 
 .tab-close:hover {
-  background: var(--error);
-  color: white;
+  background: rgba(255, 68, 68, 0.15);
+  color: var(--error);
 }
 
-.panel-header {
-  background: var(--bg-secondary);
-  padding: 0.5rem 1rem;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+/* Tab drag reorder indicators */
+.tab.dragging {
+  opacity: 0.4;
 }
 
-.file-info {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-  flex: 1;
-  margin-right: 1rem;
-  min-width: 0;
+.tab.drag-over-left {
+  box-shadow: -2px 0 0 0 var(--accent);
 }
 
-.file-name {
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: var(--text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.tab.drag-over-right {
+  box-shadow: 2px 0 0 0 var(--accent);
 }
 
-.file-name.modified {
-  color: var(--accent);
-}
-
-.file-name.empty {
-  color: var(--text-secondary);
-  font-style: italic;
-}
-
-.file-path {
-  font-size: 0.7rem;
-  color: var(--text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.header-right {
+.home-btn {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.35rem;
+  height: 28px;
+  padding: 0 0.5rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
   flex-shrink: 0;
+  transition: all 0.15s;
+  font-size: 0.8rem;
+}
+
+.home-label {
+  font-size: 0.8rem;
+}
+
+.home-btn:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.toolbar-spacer {
+  flex: 1;
+}
+
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.toolbar-actions button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.25rem 0.4rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: all 0.15s;
+}
+
+.toolbar-actions button:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
 }
 
 .file-env-select {
@@ -2677,24 +2560,33 @@ onUnmounted(() => {
 }
 
 .save-btn {
-  background: var(--success) !important;
-  color: white !important;
+  background: transparent !important;
+  color: var(--success) !important;
+}
+
+.save-btn:hover {
+  background: var(--bg-secondary) !important;
 }
 
 .save-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.3;
   cursor: not-allowed;
 }
 
 .close-btn {
   background: transparent !important;
   color: var(--text-secondary) !important;
-  font-size: 1.1rem !important;
-  padding: 0.2rem 0.5rem !important;
+  padding: 0.25rem 0.4rem !important;
 }
 
 .close-btn:hover {
   color: var(--error) !important;
+  background: var(--bg-secondary) !important;
+}
+
+.preview-btn.active {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 .no-file-message {
@@ -2733,15 +2625,67 @@ onUnmounted(() => {
   color: var(--accent);
 }
 
-.panel-header button {
-  font-size: 0.8rem;
-  padding: 0.3rem 0.6rem;
-}
-
 .cells {
   flex: 1;
   overflow-y: auto;
   padding: 0.75rem;
+}
+
+/* Split Editor Layout */
+.editor-groups-container {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  position: relative;
+}
+
+.editor-groups-container.split-h {
+  flex-direction: row;
+}
+
+.editor-groups-container.split-v {
+  flex-direction: column;
+}
+
+.split-resize-handle {
+  flex-shrink: 0;
+  background: var(--border);
+  transition: background 0.2s;
+  z-index: 10;
+  position: relative;
+}
+
+.split-resize-handle.handle-col {
+  width: 4px;
+  cursor: col-resize;
+}
+
+.split-resize-handle.handle-row {
+  height: 4px;
+  cursor: row-resize;
+}
+
+.split-resize-handle:hover {
+  background: var(--accent);
+}
+
+.split-toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.25rem 0.4rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.split-toggle-btn:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
 }
 
 /* Create Environment Dialog */
@@ -2863,21 +2807,6 @@ onUnmounted(() => {
 
 .create-btn {
   padding: 0.5rem 1rem;
-  background: var(--accent);
-  border: none;
-  color: var(--bg-primary);
-  border-radius: 4px;
-  cursor: pointer;
-  font-weight: 600;
-}
-
-.create-btn:hover:not(:disabled) {
-  opacity: 0.9;
-}
-
-.create-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .dialog-status {
@@ -2958,176 +2887,10 @@ onUnmounted(() => {
 }
 
 .preview-btn.active {
-  background: var(--accent);
+  background: rgba(0, 212, 255, 0.1);
   border-color: var(--accent);
-  color: var(--bg-primary);
+  color: var(--accent);
 }
 
-/* Markdown Preview Panel - styled like code cell editor */
-/* Using :deep() to style v-html injected content */
-.markdown-preview {
-  flex: 1;
-  overflow-y: auto;
-  padding: 1.5rem 2rem;
-  background: #1a1a24;
-  color: #f8f8f2;
-  font-family: 'Monaco', 'Menlo', 'Consolas', 'Liberation Mono', 'Courier New', monospace;
-  font-size: 0.9rem;
-  line-height: 1.7;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  margin: 0.5rem;
-}
-
-.markdown-preview :deep(h1),
-.markdown-preview :deep(h2),
-.markdown-preview :deep(h3),
-.markdown-preview :deep(h4),
-.markdown-preview :deep(h5),
-.markdown-preview :deep(h6) {
-  color: #bd93f9;
-  margin-top: 1.5em;
-  margin-bottom: 0.5em;
-  font-weight: 600;
-  line-height: 1.3;
-}
-
-.markdown-preview :deep(h1) {
-  font-size: 1.8em;
-  border-bottom: 1px solid #3a3a4a;
-  padding-bottom: 0.3em;
-}
-
-.markdown-preview :deep(h2) {
-  font-size: 1.4em;
-  border-bottom: 1px solid #3a3a4a;
-  padding-bottom: 0.3em;
-}
-
-.markdown-preview :deep(h3) {
-  font-size: 1.2em;
-  color: #ff79c6;
-}
-
-.markdown-preview :deep(h4),
-.markdown-preview :deep(h5),
-.markdown-preview :deep(h6) {
-  color: #8be9fd;
-}
-
-.markdown-preview :deep(p) {
-  margin: 0.75em 0;
-}
-
-.markdown-preview :deep(a) {
-  color: #50fa7b;
-  text-decoration: none;
-  transition: color 0.15s;
-}
-
-.markdown-preview :deep(a:hover) {
-  color: #69ff94;
-  text-decoration: underline;
-}
-
-.markdown-preview :deep(code) {
-  background: #12121a;
-  padding: 0.2em 0.4em;
-  border-radius: 3px;
-  font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
-  font-size: 0.9em;
-  color: #f1fa8c;
-  border: 1px solid #2a2a3a;
-}
-
-.markdown-preview :deep(pre) {
-  background: #12121a;
-  padding: 1em;
-  border-radius: 6px;
-  overflow-x: auto;
-  margin: 1em 0;
-  border: 1px solid #2a2a3a;
-}
-
-.markdown-preview :deep(pre code) {
-  background: transparent;
-  padding: 0;
-  font-size: 0.85em;
-  line-height: 1.5;
-  color: #f8f8f2;
-  border: none;
-}
-
-.markdown-preview :deep(ul),
-.markdown-preview :deep(ol) {
-  margin: 0.75em 0;
-  padding-left: 2em;
-}
-
-.markdown-preview :deep(li) {
-  margin: 0.25em 0;
-}
-
-.markdown-preview :deep(li::marker) {
-  color: #6272a4;
-}
-
-.markdown-preview :deep(blockquote) {
-  margin: 1em 0;
-  padding: 0.5em 1em;
-  border-left: 4px solid #bd93f9;
-  background: #12121a;
-  color: #6272a4;
-  font-style: italic;
-}
-
-.markdown-preview :deep(blockquote p) {
-  margin: 0.5em 0;
-}
-
-.markdown-preview :deep(table) {
-  border-collapse: collapse;
-  width: 100%;
-  margin: 1em 0;
-}
-
-.markdown-preview :deep(th),
-.markdown-preview :deep(td) {
-  border: 1px solid #3a3a4a;
-  padding: 0.5em 0.75em;
-  text-align: left;
-}
-
-.markdown-preview :deep(th) {
-  background: #12121a;
-  font-weight: 600;
-  color: #8be9fd;
-}
-
-.markdown-preview :deep(tr:nth-child(even)) {
-  background: rgba(98, 114, 164, 0.1);
-}
-
-.markdown-preview :deep(hr) {
-  border: none;
-  border-top: 1px solid #3a3a4a;
-  margin: 2em 0;
-}
-
-.markdown-preview :deep(img) {
-  max-width: 100%;
-  height: auto;
-  border-radius: 4px;
-  border: 1px solid #3a3a4a;
-}
-
-.markdown-preview :deep(strong) {
-  font-weight: 600;
-  color: #ffb86c;
-}
-
-.markdown-preview :deep(em) {
-  font-style: italic;
-  color: #ff79c6;
-}
+/* Markdown preview styles are in EditorGroup.vue where the element lives */
 </style>

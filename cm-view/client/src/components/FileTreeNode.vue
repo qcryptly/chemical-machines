@@ -22,11 +22,14 @@
         class="expand-icon"
         @click.stop="toggleExpand"
       >
-        {{ expanded ? '▼' : '▶' }}
+        <ChevronDown v-if="expanded" :size="12" />
+        <ChevronRight v-else :size="12" />
       </span>
       <span v-else class="file-spacer"></span>
 
-      <span class="node-icon">{{ getIcon(item) }}</span>
+      <span class="node-icon">
+        <component :is="getIconComponent(item)" :size="14" />
+      </span>
       <span class="node-name">{{ item.name }}</span>
     </div>
 
@@ -64,6 +67,11 @@
 <script setup>
 import { ref, watch } from 'vue'
 import axios from 'axios'
+import {
+  ChevronDown, ChevronRight,
+  FolderOpen, Folder,
+  FileCode, Settings, Terminal, Braces, FileText, File
+} from 'lucide-vue-next'
 
 const props = defineProps({
   item: { type: Object, required: true },
@@ -131,29 +139,29 @@ function loadMore() {
   }
 }
 
-function getIcon(item) {
+function getIconComponent(item) {
   if (item.type === 'folder') {
-    return expanded.value ? '📂' : '📁'
+    return expanded.value ? FolderOpen : Folder
   }
 
   const ext = item.name.split('.').pop()?.toLowerCase()
   switch (ext) {
     case 'py':
-      return '🐍'  // snake for python
+      return FileCode
     case 'cpp':
     case 'c':
     case 'h':
     case 'hpp':
-      return '⚙'  // gear
+      return Settings
     case 'sh':
     case 'bash':
-      return '💻'  // terminal
+      return Terminal
     case 'json':
-      return '{}'
+      return Braces
     case 'md':
-      return '📄'
+      return FileText
     default:
-      return '📄'  // document
+      return File
   }
 }
 
@@ -272,7 +280,8 @@ function handleDrop(event) {
 
 .expand-icon {
   width: 14px;
-  font-size: 0.6rem;
+  display: inline-flex;
+  align-items: center;
   color: var(--text-secondary);
   flex-shrink: 0;
 }
@@ -284,7 +293,8 @@ function handleDrop(event) {
 
 .node-icon {
   margin-right: 0.4rem;
-  font-size: 0.85rem;
+  display: inline-flex;
+  align-items: center;
 }
 
 .node-name {

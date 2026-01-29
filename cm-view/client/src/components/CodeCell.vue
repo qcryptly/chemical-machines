@@ -13,40 +13,47 @@
         draggable="true"
         @dragstart="handleDragStart"
         @dragend="handleDragEnd"
-      >⋮⋮</span>
+      ><GripVertical :size="14" /></span>
       <span class="cell-number">[{{ index + 1 }}]</span>
       <div class="toolbar-spacer"></div>
-      <button @click="$emit('create-below')" class="create-below-btn" title="Create cell below (Alt+Enter)">
-        <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
-          <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
-        </svg>
+      <button @click="$emit('create-below')" class="btn-icon create-below-btn" title="Create cell below (Alt+Enter)">
+        <Plus :size="14" />
       </button>
       <button
         v-if="cell.status === 'running'"
         @click="$emit('interrupt')"
-        class="interrupt-btn"
+        class="btn-icon interrupt-btn"
         title="Interrupt execution (Ctrl+C)"
       >
-        <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
-          <path d="M6 6h12v12H6z"/>
-        </svg>
+        <Square :size="14" />
       </button>
-      <button @click="$emit('run')" class="run-btn" title="Run cell (Ctrl+Enter)" v-else>
-        <span>&#9654;</span>
+      <button @click="$emit('run')" class="btn-icon run-btn" title="Run cell (Ctrl+Enter)" v-else>
+        <Play :size="14" />
       </button>
-      <button @click="$emit('delete')" class="delete-btn" title="Delete cell">&times;</button>
+      <button @click="$emit('delete')" class="btn-icon btn-danger delete-btn" title="Delete cell"><X :size="14" /></button>
     </div>
 
     <div class="cell-input" ref="editorContainer"></div>
 
     <div class="cell-output" v-if="cell.output || cell.status === 'running'">
-      <div v-if="cell.status === 'running' && !cell.output" class="running-indicator">
-        Running...
+      <div class="cell-output-header" @click="logCollapsed = !logCollapsed">
+        <span class="cell-output-label">Log</span>
+        <span class="cell-output-chevron" :class="{ collapsed: logCollapsed }"><ChevronDown :size="12" /></span>
       </div>
-      <pre v-if="cell.output" :class="{ error: cell.status === 'error' }">{{ cell.output }}</pre>
-      <div v-if="cell.status === 'running' && cell.output" class="running-indicator streaming">
-        ▶ Running...
+      <div class="cell-output-body" v-show="!logCollapsed" :style="{ maxHeight: logHeight + 'px' }">
+        <div v-if="cell.status === 'running' && !cell.output" class="running-indicator">
+          Running...
+        </div>
+        <pre v-if="cell.output" :class="{ error: cell.status === 'error' }">{{ cell.output }}</pre>
+        <div v-if="cell.status === 'running' && cell.output" class="running-indicator streaming">
+          <Play :size="10" style="display:inline-block;vertical-align:middle;margin-right:0.25rem" /> Running...
+        </div>
       </div>
+      <div
+        v-if="!logCollapsed"
+        class="cell-output-resize"
+        @pointerdown="startLogResize"
+      ></div>
     </div>
 
     <!-- HTML Output Panel -->
@@ -61,6 +68,7 @@
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from '@codemirror/view'
 import OutputPanel from './OutputPanel.vue'
+import { GripVertical, Plus, Square, Play, X, ChevronDown } from 'lucide-vue-next'
 import { EditorState } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap, insertNewlineAndIndent, indentMore } from '@codemirror/commands'
 import { syntaxHighlighting, HighlightStyle, bracketMatching, foldGutter } from '@codemirror/language'
@@ -1857,6 +1865,52 @@ const isDragOver = ref(false)
 const isDragging = ref(false)
 let editorView = null
 
+// Log output collapse & resize
+const logCollapsed = ref(false)
+const logHeight = ref(200)
+let logResizing = false
+let logStartY = 0
+let logStartHeight = 0
+
+let logResizeTarget = null
+
+function startLogResize(e) {
+  e.preventDefault()
+  logResizing = true
+  logStartY = e.clientY
+  logStartHeight = logHeight.value
+  logResizeTarget = e.target
+  // Capture pointer to prevent content from stealing events
+  logResizeTarget.setPointerCapture(e.pointerId)
+  logResizeTarget.addEventListener('pointermove', doLogResize)
+  logResizeTarget.addEventListener('pointerup', stopLogResize)
+  logResizeTarget.addEventListener('pointercancel', stopLogResize)
+  document.body.style.userSelect = 'none'
+  document.body.style.cursor = 'row-resize'
+}
+
+function doLogResize(e) {
+  if (!logResizing) return
+  const delta = e.clientY - logStartY
+  logHeight.value = Math.max(60, logStartHeight + delta)
+}
+
+function stopLogResize(e) {
+  if (!logResizing) return
+  logResizing = false
+  if (logResizeTarget) {
+    if (e && e.pointerId !== undefined) {
+      logResizeTarget.releasePointerCapture(e.pointerId)
+    }
+    logResizeTarget.removeEventListener('pointermove', doLogResize)
+    logResizeTarget.removeEventListener('pointerup', stopLogResize)
+    logResizeTarget.removeEventListener('pointercancel', stopLogResize)
+    logResizeTarget = null
+  }
+  document.body.style.userSelect = ''
+  document.body.style.cursor = ''
+}
+
 // Drag-and-drop handlers
 function handleDragStart(event) {
   event.dataTransfer.effectAllowed = 'move'
@@ -2277,6 +2331,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   destroyEditor()
+  stopLogResize()
 })
 </script>
 
@@ -2379,60 +2434,38 @@ onUnmounted(() => {
   flex: 1;
 }
 
+/* Cell toolbar buttons — override btn-icon size */
 .run-btn, .delete-btn, .create-below-btn, .interrupt-btn {
   width: 22px;
   height: 22px;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.85rem;
-  border-radius: 4px;
-  border: none;
-  cursor: pointer;
-  transition: all 0.2s;
 }
 
 .create-below-btn {
-  background: transparent;
-  color: var(--text-secondary);
   border: 1px solid var(--border);
 }
 
 .create-below-btn:hover {
-  background: var(--accent);
-  color: white;
-  border-color: var(--accent);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
 }
 
 .run-btn {
-  background: var(--success);
-  color: white;
+  color: var(--success);
 }
 
 .run-btn:hover {
-  opacity: 0.9;
+  background: rgba(68, 255, 136, 0.1);
 }
 
 .interrupt-btn {
-  background: #f59e0b;
-  color: white;
+  color: #f59e0b;
   animation: pulse-interrupt 1.5s ease-in-out infinite;
 }
 
 .interrupt-btn:hover {
-  background: #d97706;
+  background: rgba(245, 158, 11, 0.15);
   animation: none;
-}
-
-.delete-btn {
-  background: transparent;
-  color: var(--text-secondary);
-}
-
-.delete-btn:hover {
-  background: var(--error);
-  color: white;
 }
 
 @keyframes pulse-interrupt {
@@ -2444,7 +2477,7 @@ onUnmounted(() => {
   width: 10px;
   height: 10px;
   border: 2px solid transparent;
-  border-top-color: white;
+  border-top-color: #f59e0b;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -2464,10 +2497,57 @@ onUnmounted(() => {
 
 .cell-output {
   border-top: 1px solid var(--border);
-  padding: 0.5rem;
   background: var(--bg-tertiary);
-  max-height: 200px;
+}
+
+.cell-output-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+  user-select: none;
+  background: #262637;
+  border-bottom: 1px solid var(--border);
+}
+
+.cell-output-header:hover {
+  background: #2d2d42;
+}
+
+.cell-output-label {
+  font-size: 0.7rem;
+  color: #6c7086;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.cell-output-chevron {
+  font-size: 0.6rem;
+  color: #6c7086;
+  display: inline-block;
+  transition: transform 0.2s ease;
+}
+
+.cell-output-chevron.collapsed {
+  transform: rotate(-90deg);
+}
+
+.cell-output-body {
+  padding: 0.5rem;
   overflow-y: auto;
+}
+
+.cell-output-resize {
+  height: 6px;
+  background: var(--border, #313244);
+  cursor: row-resize;
+  transition: background 0.2s;
+}
+
+.cell-output-resize:hover {
+  background: var(--accent, #89b4fa);
 }
 
 .cell-output pre {

@@ -1,9 +1,5 @@
 <template>
   <div class="workspace-list">
-    <div class="header">
-      <h2>Workspaces</h2>
-    </div>
-
     <!-- Service Status (shown when services not healthy) -->
     <ServiceStatus
       v-if="!servicesReady"
@@ -23,7 +19,7 @@
     <div v-else-if="loadError" class="error-container">
       <p class="error-text">Failed to load workspaces</p>
       <p class="error-detail">{{ loadError }}</p>
-      <button @click="loadWorkspaces" class="retry-btn">Retry</button>
+      <button @click="loadWorkspaces" class="btn-primary retry-btn">Retry</button>
     </div>
 
     <div v-else class="workspaces">
@@ -34,7 +30,7 @@
         @click="!isCreating && startCreating()"
       >
         <template v-if="!isCreating">
-          <div class="create-icon">+</div>
+          <div class="create-icon"><Plus :size="24" /></div>
           <span class="create-text">New Workspace</span>
         </template>
         <template v-else>
@@ -57,11 +53,11 @@
             </select>
           </div>
           <div class="create-actions">
-            <button @click.stop="createWorkspace" class="create-btn" :disabled="!newWorkspaceName.trim() || isCreatingWorkspace">
+            <button @click.stop="createWorkspace" class="btn-primary create-btn" :disabled="!newWorkspaceName.trim() || isCreatingWorkspace">
               <span v-if="isCreatingWorkspace" class="btn-spinner"></span>
               {{ isCreatingWorkspace ? 'Creating...' : 'Create' }}
             </button>
-            <button @click.stop="cancelCreating" class="cancel-btn" :disabled="isCreatingWorkspace">Cancel</button>
+            <button @click.stop="cancelCreating" class="btn-secondary cancel-btn" :disabled="isCreatingWorkspace">Cancel</button>
           </div>
         </template>
       </div>
@@ -76,9 +72,9 @@
       >
         <div class="workspace-header">
           <h3>{{ workspace.name }}</h3>
-          <button @click.stop="deleteWorkspace(workspace)" class="delete-btn" title="Delete workspace" :disabled="deletingId === workspace.id">
+          <button @click.stop="deleteWorkspace(workspace)" class="btn-icon delete-btn" title="Delete workspace" :disabled="deletingId === workspace.id">
             <span v-if="deletingId === workspace.id" class="btn-spinner small"></span>
-            <span v-else>&times;</span>
+            <X v-else :size="14" />
           </button>
         </div>
 
@@ -86,19 +82,19 @@
           <!-- Environment Stats -->
           <div class="meta-row" v-if="workspace.stats">
             <span class="meta-item" v-if="workspace.stats.pythonEnvs > 0" title="Python environments">
-              <span class="meta-icon">Py</span>
+              <span class="meta-icon"><FileCode :size="12" /></span>
               <span class="meta-value">{{ workspace.stats.pythonEnvs }}</span>
             </span>
             <span class="meta-item" v-if="workspace.stats.cppEnvs > 0" title="C++ environments">
-              <span class="meta-icon">C++</span>
+              <span class="meta-icon"><Settings :size="12" /></span>
               <span class="meta-value">{{ workspace.stats.cppEnvs }}</span>
             </span>
             <span class="meta-item" v-if="workspace.stats.vendorEnvs > 0" title="Vendor environments">
-              <span class="meta-icon">Lib</span>
+              <span class="meta-icon"><Library :size="12" /></span>
               <span class="meta-value">{{ workspace.stats.vendorEnvs }}</span>
             </span>
             <span class="meta-item" v-if="workspace.stats.files > 0" title="Files">
-              <span class="meta-icon file-icon">&#128196;</span>
+              <span class="meta-icon"><Files :size="12" /></span>
               <span class="meta-value">{{ workspace.stats.files }}</span>
             </span>
           </div>
@@ -120,6 +116,7 @@ import { ref, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
 import ServiceStatus from '../components/ServiceStatus.vue'
+import { Plus, X, FileCode, Settings, Library, Files } from 'lucide-vue-next'
 
 const router = useRouter()
 const workspaces = ref([])
@@ -277,18 +274,6 @@ onMounted(async () => {
   margin: 0 auto;
 }
 
-.header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 2rem;
-}
-
-.header h2 {
-  font-size: 2rem;
-  color: var(--accent);
-}
-
 .workspaces {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -402,32 +387,6 @@ onMounted(async () => {
 
 .create-btn, .cancel-btn {
   flex: 1;
-  padding: 0.5rem 1rem;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.85rem;
-  transition: opacity 0.2s;
-}
-
-.create-btn {
-  background: var(--accent);
-  color: var(--bg-primary);
-}
-
-.create-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.cancel-btn {
-  background: var(--bg-primary);
-  color: var(--text-secondary);
-  border: 1px solid var(--border);
-}
-
-.cancel-btn:hover {
-  border-color: var(--text-secondary);
 }
 
 /* Workspace Card Content */
@@ -446,15 +405,8 @@ onMounted(async () => {
 }
 
 .delete-btn {
-  background: none;
-  border: none;
-  color: var(--text-secondary);
-  font-size: 1.25rem;
-  cursor: pointer;
-  padding: 0 0.25rem;
-  line-height: 1;
   opacity: 0;
-  transition: opacity 0.2s, color 0.2s;
+  transition: opacity 0.2s;
 }
 
 .workspace-card:hover .delete-btn {
@@ -462,7 +414,7 @@ onMounted(async () => {
 }
 
 .delete-btn:hover {
-  color: #f87171;
+  color: var(--error);
 }
 
 .workspace-meta {
@@ -488,12 +440,8 @@ onMounted(async () => {
 
 .meta-icon {
   color: var(--accent);
-  font-weight: 600;
-  font-size: 0.7rem;
-}
-
-.meta-icon.file-icon {
-  font-size: 0.85rem;
+  display: inline-flex;
+  align-items: center;
 }
 
 .meta-value {
@@ -562,18 +510,6 @@ onMounted(async () => {
 
 .retry-btn {
   margin-top: 0.5rem;
-  padding: 0.5rem 1.5rem;
-  background: var(--accent);
-  color: var(--bg-primary);
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  transition: opacity 0.2s;
-}
-
-.retry-btn:hover {
-  opacity: 0.9;
 }
 
 /* Button Spinner */

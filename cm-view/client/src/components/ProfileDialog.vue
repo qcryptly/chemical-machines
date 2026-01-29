@@ -3,7 +3,7 @@
     <div class="dialog">
       <div class="dialog-header">
         <h3>{{ profile ? 'Profile' : 'Create Profile' }}</h3>
-        <button @click="$emit('close')" class="close-btn">&times;</button>
+        <button @click="$emit('close')" class="btn-icon btn-danger close-btn"><X :size="14" /></button>
       </div>
 
       <!-- Profile Form -->
@@ -16,7 +16,7 @@
           <label>Email</label>
           <input v-model="email" type="email" placeholder="your.email@example.com" />
         </div>
-        <button @click="saveProfile" class="save-btn" :disabled="saving || !name || !email">
+        <button @click="saveProfile" class="btn-primary save-btn" :disabled="saving || !name || !email">
           {{ saving ? 'Saving...' : (profile ? 'Update Profile' : 'Create Profile') }}
         </button>
       </div>
@@ -33,7 +33,7 @@
         <div v-if="profile.ssh_public_key" class="ssh-key-display">
           <div class="key-header">
             <span>Public Key</span>
-            <button @click="copyPublicKey" class="copy-btn" :class="{ copied }">
+            <button @click="copyPublicKey" class="btn-secondary copy-btn" :class="{ copied }">
               {{ copied ? 'Copied!' : 'Copy' }}
             </button>
           </div>
@@ -50,7 +50,7 @@
 
         <button
           @click="generateSSHKey"
-          class="generate-btn"
+          class="btn-secondary generate-btn"
           :disabled="generating"
         >
           {{ generating ? 'Generating...' : (profile.ssh_public_key ? 'Regenerate SSH Key' : 'Generate SSH Key') }}
@@ -72,6 +72,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import axios from 'axios'
+import { X } from 'lucide-vue-next'
 
 const emit = defineEmits(['close', 'updated'])
 
@@ -207,16 +208,6 @@ onMounted(() => {
 .close-btn {
   width: 28px;
   height: 28px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 1.2rem;
-}
-
-.close-btn:hover {
-  color: var(--error);
 }
 
 .form-section {
@@ -254,22 +245,7 @@ onMounted(() => {
 .save-btn {
   width: 100%;
   padding: 0.6rem;
-  background: var(--accent);
-  border: none;
-  border-radius: 4px;
-  color: var(--bg-primary);
-  font-weight: 600;
-  cursor: pointer;
   font-size: 0.9rem;
-}
-
-.save-btn:hover:not(:disabled) {
-  opacity: 0.9;
-}
-
-.save-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .ssh-section {
@@ -317,16 +293,6 @@ onMounted(() => {
 .copy-btn {
   padding: 0.25rem 0.5rem;
   font-size: 0.75rem;
-  background: var(--bg-primary);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-
-.copy-btn:hover {
-  border-color: var(--accent);
-  color: var(--accent);
 }
 
 .copy-btn.copied {
@@ -379,22 +345,14 @@ onMounted(() => {
 .generate-btn {
   width: 100%;
   padding: 0.6rem;
-  background: var(--bg-primary);
-  border: 1px solid var(--accent);
-  border-radius: 4px;
-  color: var(--accent);
-  font-weight: 600;
-  cursor: pointer;
   font-size: 0.9rem;
+  font-weight: 600;
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .generate-btn:hover:not(:disabled) {
   background: rgba(0, 212, 255, 0.1);
-}
-
-.generate-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .warning {

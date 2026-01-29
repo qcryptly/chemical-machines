@@ -1,6 +1,6 @@
 <template>
   <div id="app">
-    <header class="app-header">
+    <header v-if="!isWorkspaceRoute" class="app-header">
       <h1>Chemical Machines</h1>
       <nav>
         <router-link to="/">Notebooks</router-link>
@@ -14,6 +14,11 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
+
+const route = useRoute()
+const isWorkspaceRoute = computed(() => /^\/workspace\/\d+/.test(route.path))
 </script>
 
 <style>
@@ -68,8 +73,8 @@ body {
 }
 
 .app-header nav a.router-link-active {
-  background: #00d4ff;
-  color: #1a1a1a;
+  background: rgba(0, 212, 255, 0.1);
+  color: #00d4ff;
 }
 
 .app-main {

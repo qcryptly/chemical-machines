@@ -3,9 +3,9 @@
     <div class="browser-header">
       <span class="header-title">Files</span>
       <div class="header-actions">
-        <button @click="createFile" title="New File" class="icon-btn">+</button>
-        <button @click="createFolder" title="New Folder" class="icon-btn">📁</button>
-        <button @click="refresh" title="Refresh" class="icon-btn">↻</button>
+        <button @click="createFile" title="New File" class="btn-icon"><FilePlus :size="14" /></button>
+        <button @click="createFolder" title="New Folder" class="btn-icon"><FolderPlus :size="14" /></button>
+        <button @click="refresh" title="Refresh" class="btn-icon"><RefreshCw :size="14" /></button>
       </div>
     </div>
 
@@ -86,8 +86,8 @@
           :placeholder="inputDialog.placeholder"
         />
         <div class="dialog-buttons">
-          <button @click="cancelInput" class="cancel-btn">Cancel</button>
-          <button @click="confirmInput" class="confirm-btn">{{ inputDialog.confirmText }}</button>
+          <button @click="cancelInput" class="btn-secondary cancel-btn">Cancel</button>
+          <button @click="confirmInput" class="btn-primary confirm-btn">{{ inputDialog.confirmText }}</button>
         </div>
       </div>
     </div>
@@ -102,7 +102,7 @@
             :class="{ selected: folderDialog.selectedFolder === '' }"
             @click="folderDialog.selectedFolder = ''"
           >
-            <span class="folder-icon">📁</span>
+            <span class="folder-icon"><Folder :size="14" /></span>
             <span>/ (Root)</span>
           </div>
           <template v-for="folder in getAllFolders()" :key="folder.path">
@@ -111,14 +111,14 @@
               :class="{ selected: folderDialog.selectedFolder === folder.path, disabled: isFolderDisabled(folder.path) }"
               @click="!isFolderDisabled(folder.path) && (folderDialog.selectedFolder = folder.path)"
             >
-              <span class="folder-icon">📁</span>
+              <span class="folder-icon"><Folder :size="14" /></span>
               <span>{{ folder.path }}</span>
             </div>
           </template>
         </div>
         <div class="dialog-buttons">
-          <button @click="cancelFolderDialog" class="cancel-btn">Cancel</button>
-          <button @click="confirmFolderDialog" class="confirm-btn">{{ folderDialog.confirmText }}</button>
+          <button @click="cancelFolderDialog" class="btn-secondary cancel-btn">Cancel</button>
+          <button @click="confirmFolderDialog" class="btn-primary confirm-btn">{{ folderDialog.confirmText }}</button>
         </div>
       </div>
     </div>
@@ -129,6 +129,7 @@
 import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import axios from 'axios'
 import FileTreeNode from './FileTreeNode.vue'
+import { FilePlus, FolderPlus, RefreshCw, Folder } from 'lucide-vue-next'
 
 const props = defineProps({
   workspaceId: { type: [String, Number], required: true }
@@ -624,23 +625,13 @@ defineExpose({ refresh })
   gap: 0.25rem;
 }
 
-.icon-btn {
+/* btn-icon overrides for smaller file browser buttons */
+.btn-icon {
   width: 22px;
   height: 22px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  color: var(--text-secondary);
-  cursor: pointer;
-  border-radius: 3px;
-  font-size: 0.8rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
-.icon-btn:hover {
-  background: var(--bg-primary);
+.btn-icon:hover {
   color: var(--accent);
 }
 
@@ -755,30 +746,7 @@ defineExpose({ refresh })
 }
 
 .cancel-btn, .confirm-btn {
-  padding: 0.4rem 0.75rem;
   font-size: 0.8rem;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.cancel-btn {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-secondary);
-}
-
-.cancel-btn:hover {
-  border-color: var(--text-secondary);
-}
-
-.confirm-btn {
-  background: var(--accent);
-  border: none;
-  color: var(--bg-primary);
-}
-
-.confirm-btn:hover {
-  opacity: 0.9;
 }
 
 .menu-header {
@@ -838,6 +806,7 @@ defineExpose({ refresh })
 }
 
 .folder-icon {
-  font-size: 0.85rem;
+  display: inline-flex;
+  align-items: center;
 }
 </style>

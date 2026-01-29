@@ -4,15 +4,9 @@
       <div class="status-icon">
         <!-- Show spinner during loading OR during startup phase -->
         <div v-if="isLoading || (isStartingUp && overallStatus !== 'healthy')" class="spinner"></div>
-        <svg v-else-if="overallStatus === 'healthy'" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
-        </svg>
-        <svg v-else-if="overallStatus === 'degraded'" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
-        </svg>
-        <svg v-else viewBox="0 0 24 24" fill="currentColor">
-          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
-        </svg>
+        <CircleCheck v-else-if="overallStatus === 'healthy'" :size="20" />
+        <TriangleAlert v-else-if="overallStatus === 'degraded'" :size="20" />
+        <CircleAlert v-else :size="20" />
       </div>
 
       <div class="status-text">
@@ -20,7 +14,7 @@
         <span class="status-detail" v-if="statusDetail">{{ statusDetail }}</span>
       </div>
 
-      <button v-if="showRetry" @click="checkHealth" class="retry-btn" :disabled="isLoading">
+      <button v-if="showRetry" @click="checkHealth" class="btn-primary retry-btn" :disabled="isLoading">
         {{ isLoading ? 'Checking...' : 'Retry' }}
       </button>
     </div>
@@ -43,6 +37,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import axios from 'axios'
+import { CircleCheck, TriangleAlert, CircleAlert } from 'lucide-vue-next'
 
 const props = defineProps({
   showDetails: {
@@ -277,22 +272,6 @@ defineExpose({ checkHealth })
 
 .retry-btn {
   padding: 0.5rem 1rem;
-  background: var(--accent);
-  color: var(--bg-primary);
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.85rem;
-  transition: opacity 0.2s;
-}
-
-.retry-btn:hover:not(:disabled) {
-  opacity: 0.9;
-}
-
-.retry-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .service-details {

@@ -6,10 +6,11 @@
         <button
           v-if="createLogs.length > 0"
           @click="dialogExpanded = !dialogExpanded"
-          class="expand-btn"
+          class="btn-icon expand-btn"
           :title="dialogExpanded ? 'Collapse' : 'Expand to see full log'"
         >
-          {{ dialogExpanded ? '⊟' : '⊞' }}
+          <Minimize2 v-if="dialogExpanded" :size="14" />
+          <Maximize2 v-else :size="14" />
         </button>
       </div>
 
@@ -68,8 +69,8 @@
       </div>
 
       <div class="dialog-actions">
-        <button @click="$emit('close')" class="cancel-btn" :disabled="isCreating">Cancel</button>
-        <button @click="createEnvironment" class="create-btn" :disabled="!canCreate || isCreating">
+        <button @click="$emit('close')" class="btn-secondary cancel-btn" :disabled="isCreating">Cancel</button>
+        <button @click="createEnvironment" class="btn-primary create-btn" :disabled="!canCreate || isCreating">
           {{ isCreating ? 'Building...' : 'Build & Install' }}
         </button>
       </div>
@@ -92,6 +93,7 @@
 <script setup>
 import { ref, computed, nextTick } from 'vue'
 import axios from 'axios'
+import { Minimize2, Maximize2 } from 'lucide-vue-next'
 
 const emit = defineEmits(['close', 'created'])
 
@@ -295,16 +297,8 @@ async function createEnvironment() {
 .expand-btn {
   width: 28px;
   height: 28px;
-  padding: 0;
   background: var(--bg-primary);
   border: 1px solid var(--border);
-  color: var(--text-secondary);
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 1rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .expand-btn:hover {
@@ -363,36 +357,8 @@ async function createEnvironment() {
   margin-top: 1.5rem;
 }
 
-.cancel-btn {
+.cancel-btn, .create-btn {
   padding: 0.5rem 1rem;
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-secondary);
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.cancel-btn:hover {
-  border-color: var(--text-secondary);
-}
-
-.create-btn {
-  padding: 0.5rem 1rem;
-  background: var(--accent);
-  border: none;
-  color: var(--bg-primary);
-  border-radius: 4px;
-  cursor: pointer;
-  font-weight: 600;
-}
-
-.create-btn:hover:not(:disabled) {
-  opacity: 0.9;
-}
-
-.create-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .dialog-status {

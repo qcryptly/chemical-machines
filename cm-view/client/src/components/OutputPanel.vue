@@ -1,12 +1,17 @@
 <template>
   <div class="output-panel" v-if="htmlContent">
     <div class="output-header" @click="toggleCollapse">
-      <span class="output-label">Output</span>
+      <span class="output-label">{{ isWebGL ? '3D View' : 'Output' }}</span>
       <button class="collapse-btn" :title="isCollapsed ? 'Expand output' : 'Collapse output'">
-        <span class="chevron" :class="{ collapsed: isCollapsed }">&#9660;</span>
+        <span class="chevron" :class="{ collapsed: isCollapsed }"><ChevronDown :size="12" /></span>
       </button>
     </div>
-    <div class="output-content" v-show="!isCollapsed">
+    <div
+      class="output-content"
+      :class="{ 'webgl-output': isWebGL }"
+      :style="isWebGL ? { height: webglHeight + 'px' } : {}"
+      v-show="!isCollapsed"
+    >
       <iframe
         ref="outputFrame"
         class="output-frame"
@@ -15,11 +20,17 @@
         @load="onFrameLoad"
       ></iframe>
     </div>
+    <div
+      v-if="isWebGL && !isCollapsed"
+      class="resize-handle"
+      @pointerdown="startResize"
+    ></div>
   </div>
 </template>
 
 <script setup>
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, onBeforeUnmount } from 'vue'
+import { ChevronDown } from 'lucide-vue-next'
 
 const props = defineProps({
   htmlContent: { type: String, default: '' }
@@ -27,10 +38,70 @@ const props = defineProps({
 
 const outputFrame = ref(null)
 const isCollapsed = ref(false)
+const webglHeight = ref(500)
+
+const isWebGL = computed(() => {
+  return props.htmlContent && props.htmlContent.includes('<!-- CM_WEBGL_OUTPUT -->')
+})
 
 function toggleCollapse() {
   isCollapsed.value = !isCollapsed.value
 }
+
+// --- WebGL resize ---
+
+let resizing = false
+let startY = 0
+let startHeight = 0
+let resizeTarget = null
+
+function startResize(e) {
+  e.preventDefault()
+  resizing = true
+  startY = e.clientY
+  startHeight = webglHeight.value
+  resizeTarget = e.target
+  // Capture pointer so iframe can't steal events during drag
+  resizeTarget.setPointerCapture(e.pointerId)
+  // Also disable iframe pointer events as a fallback
+  if (outputFrame.value) {
+    outputFrame.value.style.pointerEvents = 'none'
+  }
+  resizeTarget.addEventListener('pointermove', doResize)
+  resizeTarget.addEventListener('pointerup', stopResize)
+  resizeTarget.addEventListener('pointercancel', stopResize)
+  document.body.style.userSelect = 'none'
+  document.body.style.cursor = 'row-resize'
+}
+
+function doResize(e) {
+  if (!resizing) return
+  const delta = e.clientY - startY
+  webglHeight.value = Math.max(200, startHeight + delta)
+}
+
+function stopResize(e) {
+  if (!resizing) return
+  resizing = false
+  if (outputFrame.value) {
+    outputFrame.value.style.pointerEvents = ''
+  }
+  if (resizeTarget) {
+    if (e && e.pointerId !== undefined) {
+      resizeTarget.releasePointerCapture(e.pointerId)
+    }
+    resizeTarget.removeEventListener('pointermove', doResize)
+    resizeTarget.removeEventListener('pointerup', stopResize)
+    resizeTarget.removeEventListener('pointercancel', stopResize)
+    resizeTarget = null
+  }
+  document.body.style.userSelect = ''
+  document.body.style.cursor = ''
+}
+
+onBeforeUnmount(() => {
+  stopResize()
+})
 
 // MathJax CDN for math rendering with automatic line breaking
 const mathJaxCdn = `
@@ -307,6 +378,14 @@ const darkModeStyles = `
 const styledHtmlContent = computed(() => {
   if (!props.htmlContent) return ''
 
+  // WebGL content is a self-contained HTML document -- pass through as-is
+  if (isWebGL.value) {
+    return props.htmlContent
+      .replace('<!-- CM_WEBGL_OUTPUT -->', '')
+      .replace('<!-- /CM_WEBGL_OUTPUT -->', '')
+      .trim()
+  }
+
   const headContent = darkModeStyles + mathJaxCdn
 
   // Check if content already has a <head> tag
@@ -324,6 +403,12 @@ const styledHtmlContent = computed(() => {
 
 function adjustFrameHeight() {
   if (outputFrame.value) {
+    // WebGL content uses fixed container height, set iframe to fill it
+    if (isWebGL.value) {
+      outputFrame.value.style.height = '100%'
+      return
+    }
+
     try {
       const doc = outputFrame.value.contentDocument || outputFrame.value.contentWindow.document
       if (doc && doc.body) {
@@ -421,11 +506,27 @@ watch(() => props.htmlContent, () => {
   overflow: auto;
 }
 
+.output-content.webgl-output {
+  max-height: none;
+  overflow: hidden;
+}
+
 .output-frame {
   width: 100%;
   min-height: 40px;
   border: none;
   background: #1e1e2e;
   display: block;
+}
+
+.resize-handle {
+  height: 6px;
+  background: var(--border, #313244);
+  cursor: row-resize;
+  transition: background 0.2s;
+}
+
+.resize-handle:hover {
+  background: var(--accent, #89b4fa);
 }
 </style>

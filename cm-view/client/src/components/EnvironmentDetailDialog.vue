@@ -8,12 +8,13 @@
           <button
             v-if="installLogs.length > 0"
             @click="dialogExpanded = !dialogExpanded"
-            class="expand-btn"
+            class="btn-icon expand-btn"
             :title="dialogExpanded ? 'Collapse' : 'Expand to see full log'"
           >
-            {{ dialogExpanded ? '⊟' : '⊞' }}
+            <Minimize2 v-if="dialogExpanded" :size="14" />
+            <Maximize2 v-else :size="14" />
           </button>
-          <button @click="$emit('close')" class="close-btn">&times;</button>
+          <button @click="$emit('close')" class="btn-icon btn-danger close-btn"><X :size="14" /></button>
         </div>
       </div>
 
@@ -38,9 +39,9 @@
           <button
             v-if="packageSearch && !isSearching"
             @click="addPackageDirectly"
-            class="add-direct-btn"
+            class="btn-primary add-direct-btn"
             title="Add package directly"
-          >+</button>
+          ><Plus :size="14" /></button>
         </div>
         <div class="search-results" v-if="searchResults.length > 0 && packageSearch.length >= 2">
           <div
@@ -60,7 +61,7 @@
       <div class="pending-packages" v-if="packagesToInstall.length > 0">
         <div class="pending-header">
           <span>Packages to install:</span>
-          <button @click="installPackages" class="install-btn" :disabled="isInstalling">
+          <button @click="installPackages" class="btn-primary install-btn" :disabled="isInstalling">
             {{ isInstalling ? 'Installing...' : 'Install' }}
           </button>
         </div>
@@ -71,7 +72,7 @@
             class="pending-package"
           >
             <span>{{ pkg }}</span>
-            <button @click="removePendingPackage(index)" class="remove-pkg-btn">&times;</button>
+            <button @click="removePendingPackage(index)" class="btn-icon btn-danger remove-pkg-btn"><X :size="12" /></button>
           </div>
         </div>
       </div>
@@ -110,10 +111,10 @@
               <span class="package-channel" v-if="pkg.channel">{{ pkg.channel }}</span>
               <button
                 @click="removePackage(pkg.name)"
-                class="remove-btn"
+                class="btn-icon btn-danger remove-btn"
                 title="Remove package"
                 :disabled="isInstalling"
-              >&times;</button>
+              ><X :size="12" /></button>
             </div>
           </div>
         </div>
@@ -126,6 +127,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import axios from 'axios'
+import { Minimize2, Maximize2, X, Plus } from 'lucide-vue-next'
 import {
   getActiveJob,
   setActiveJob,
@@ -704,16 +706,8 @@ watch(() => props.environment, () => {
 .expand-btn {
   width: 28px;
   height: 28px;
-  padding: 0;
   background: var(--bg-primary);
   border: 1px solid var(--border);
-  color: var(--text-secondary);
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 1rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .expand-btn:hover {
@@ -724,19 +718,6 @@ watch(() => props.environment, () => {
 .close-btn {
   width: 28px;
   height: 28px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 1.2rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.close-btn:hover {
-  color: var(--error);
 }
 
 .env-details {
@@ -780,17 +761,6 @@ watch(() => props.environment, () => {
 .add-direct-btn {
   width: 36px;
   padding: 0;
-  background: var(--accent);
-  border: none;
-  color: var(--bg-primary);
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 1.2rem;
-  font-weight: bold;
-}
-
-.add-direct-btn:hover {
-  opacity: 0.9;
 }
 
 .search-results {
@@ -866,21 +836,6 @@ watch(() => props.environment, () => {
 .install-btn {
   padding: 0.35rem 0.75rem;
   font-size: 0.8rem;
-  background: var(--accent);
-  border: none;
-  color: var(--bg-primary);
-  border-radius: 4px;
-  cursor: pointer;
-  font-weight: 600;
-}
-
-.install-btn:hover:not(:disabled) {
-  opacity: 0.9;
-}
-
-.install-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .pending-list {
@@ -902,17 +857,8 @@ watch(() => props.environment, () => {
 }
 
 .remove-pkg-btn {
-  background: transparent;
-  border: none;
-  color: var(--text-secondary);
-  cursor: pointer;
-  padding: 0;
-  font-size: 0.9rem;
-  line-height: 1;
-}
-
-.remove-pkg-btn:hover {
-  color: var(--error);
+  width: 18px;
+  height: 18px;
 }
 
 .install-log {
@@ -1064,30 +1010,12 @@ watch(() => props.environment, () => {
 .remove-btn {
   width: 20px;
   height: 20px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 0.9rem;
-  line-height: 1;
-  border-radius: 3px;
   opacity: 0;
   transition: opacity 0.15s;
 }
 
 .package-item:hover .remove-btn {
   opacity: 1;
-}
-
-.remove-btn:hover {
-  background: var(--error);
-  color: white;
-}
-
-.remove-btn:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
 }
 
 .loading {

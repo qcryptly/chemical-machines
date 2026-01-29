@@ -23,24 +23,91 @@ code {
   font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
 }
 
+/* Base button reset — neutral by default */
 button {
-  background: var(--accent);
-  color: var(--bg-primary);
+  background: transparent;
+  color: var(--text-secondary);
   border: none;
-  padding: 0.5rem 1rem;
+  padding: 0;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 0.9rem;
-  transition: background 0.2s;
-}
-
-button:hover {
-  background: var(--accent-hover);
+  font-size: 0.85rem;
+  font-family: inherit;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
 }
 
 button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Primary action button — text accent, subtle hover */
+.btn-primary {
+  background: transparent;
+  color: var(--accent);
+  padding: 0.4rem 0.85rem;
+  font-weight: 600;
+  border: none;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+}
+
+/* Secondary button — outlined, subtle */
+.btn-secondary {
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 0.4rem 0.85rem;
+  border: 1px solid var(--border);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+  border-color: var(--text-secondary);
+  color: var(--text-primary);
+}
+
+/* Ghost/icon button — transparent, minimal */
+.btn-icon {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  border: none;
+  border-radius: 4px;
+}
+
+.btn-icon:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+/* Danger variant — subtle red hover */
+.btn-danger:hover:not(:disabled) {
+  background: rgba(255, 68, 68, 0.15);
+  color: var(--error);
+}
+
+.btn-danger:hover:not(:disabled) .lucide {
+  stroke: var(--error);
+}
+
+/* Success variant — text success, subtle hover */
+.btn-success {
+  background: transparent;
+  color: var(--success);
+  padding: 0.4rem 0.85rem;
+  font-weight: 600;
+}
+
+.btn-success:hover:not(:disabled) {
+  background: rgba(68, 255, 136, 0.1);
 }
 
 input, textarea {
@@ -55,4 +122,27 @@ input, textarea {
 input:focus, textarea:focus {
   outline: none;
   border-color: var(--accent);
+}
+
+/* Lucide icon theme — light outline with gradient-like appearance */
+.lucide {
+  stroke: #b4b8cf;
+  stroke-width: 2;
+  transition: stroke 0.2s ease;
+  vertical-align: middle;
+}
+
+button .lucide,
+.icon-btn .lucide {
+  stroke: #a8adc4;
+}
+
+button:hover .lucide,
+.icon-btn:hover .lucide {
+  stroke: #e0e4f0;
+}
+
+button:active .lucide,
+.icon-btn:active .lucide {
+  stroke: var(--accent);
 }

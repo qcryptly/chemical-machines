@@ -22,6 +22,7 @@
     "@xterm/addon-web-links": "^0.11.0",
     "axios": "^1.6.2",
     "codemirror": "^6.0.1",
+    "lucide-vue-next": "^0.563.0",
     "marked": "^15.0.0",
     "pinia": "^2.1.7",
     "three": "^0.159.0",

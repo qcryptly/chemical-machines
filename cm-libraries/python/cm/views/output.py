@@ -466,13 +466,12 @@ def dataframe(df, max_rows: int = 50):
         log(f"Error rendering DataFrame: {e}", level="error")
 
 
-# WebGL Main View
+# WebGL Inline Output
 def webgl(content: str):
     """
-    Output WebGL/3D content to the main visualization panel.
+    Output WebGL/3D content inline in the current cell's output.
 
-    This writes to a special .out/main.webgl.html file that is displayed
-    in the collapsible WebGL panel at the top of the workspace.
+    The content is rendered inside a collapsible output panel below the cell.
 
     Args:
         content: Full HTML content including WebGL/Three.js code
@@ -511,13 +510,10 @@ def webgl(content: str):
         </html>
         ''')
     """
-    if not _WORKSPACE_DIR:
-        log("CM_WORKSPACE_DIR not set, cannot write WebGL output", level="error")
-        return
-
-    webgl_path = Path(_WORKSPACE_DIR) / '.out' / 'main.webgl.html'
-    webgl_path.parent.mkdir(parents=True, exist_ok=True)
-    webgl_path.write_text(content, encoding='utf-8')
+    global _current_cell_outputs
+    marked = f'<!-- CM_WEBGL_OUTPUT -->\n{content}\n<!-- /CM_WEBGL_OUTPUT -->'
+    _current_cell_outputs = [marked]
+    _write_outputs()
 
 
 def webgl_threejs(
@@ -530,7 +526,7 @@ def webgl_threejs(
     controls: bool = True
 ):
     """
-    Output a Three.js scene with common boilerplate handled.
+    Output a Three.js scene inline in the current cell's output.
 
     Args:
         scene_setup: JavaScript code to set up the scene (add meshes, lights, etc.)

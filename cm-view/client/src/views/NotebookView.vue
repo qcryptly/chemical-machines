@@ -6,7 +6,7 @@
         @blur="saveNotebook"
         class="notebook-title"
       />
-      <button @click="addCell">+ Cell</button>
+      <button @click="addCell" class="btn-secondary"><Plus :size="12" /> Cell</button>
     </div>
 
     <div class="cells">
@@ -17,8 +17,8 @@
       >
         <div class="cell-toolbar">
           <span class="cell-type">{{ cell.type }}</span>
-          <button @click="executeCell(index)" v-if="cell.type === 'code'">Run</button>
-          <button @click="deleteCell(index)" class="delete">Delete</button>
+          <button @click="executeCell(index)" v-if="cell.type === 'code'" class="btn-primary">Run</button>
+          <button @click="deleteCell(index)" class="btn-danger delete">Delete</button>
         </div>
 
         <div class="cell-input">
@@ -45,6 +45,7 @@
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
+import { Plus } from 'lucide-vue-next'
 
 const route = useRoute()
 const notebook = ref(null)
@@ -197,12 +198,7 @@ onMounted(() => {
 }
 
 .cell-toolbar button {
-  font-size: 0.85rem;
   padding: 0.25rem 0.75rem;
-}
-
-.cell-toolbar button.delete {
-  background: var(--error);
 }
 
 .cell-input textarea {

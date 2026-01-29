@@ -25,6 +25,7 @@ from .internal_coords import (
     dihedral_angle,
 )
 from .ts_search import (
+    TSResult,
     TransitionStateOptimizer,
     find_transition_state,
 )
@@ -40,6 +41,7 @@ __all__ = [
     'bond_angle',
     'dihedral_angle',
     # TS search
+    'TSResult',
     'TransitionStateOptimizer',
     'find_transition_state',
 ]

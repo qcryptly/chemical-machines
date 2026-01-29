@@ -13,8 +13,10 @@ where W is the energy-weighted density matrix.
 """
 
 from .hf_gradient import (
+    GradientResult,
     hf_gradient,
     HFGradientCalculator,
+    numerical_gradient,
 )
 from .dft_gradient import (
     dft_gradient,
@@ -28,12 +30,16 @@ from .derivative_integrals import (
 )
 
 __all__ = [
+    # Results
+    'GradientResult',
     # HF
     'hf_gradient',
     'HFGradientCalculator',
     # DFT
     'dft_gradient',
     'DFTGradientCalculator',
+    # Numerical
+    'numerical_gradient',
     # Derivative integrals
     'overlap_derivative',
     'kinetic_derivative',

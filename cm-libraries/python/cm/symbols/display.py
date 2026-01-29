@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from abc import ABC
 
+from .. import views
 from .core import Expr, Var, Const, _get_sympy
 
 __all__ = [
@@ -26,6 +27,7 @@ __all__ = [
     'bullets',
     'numbered',
     'items',
+    'get_notation',
     'set_notation',
     'set_line_height',
     # Chemistry helpers

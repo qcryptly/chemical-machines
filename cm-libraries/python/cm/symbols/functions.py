@@ -9,13 +9,16 @@ from dataclasses import dataclass, field
 from enum import Enum
 from abc import ABC, abstractmethod
 
+from .. import views
 from .core import (
     Expr, Var, Const, SymbolicConst, SympyWrapper,
     Add, Sub, Mul, Div, Pow, Neg,
     Sqrt, Sin, Cos, Tan, Exp, Log, Abs,
     Integral, Derivative, Sum, Product,
+    EvaluationError,
     _ensure_expr, _get_sympy, _get_torch,
 )
+from .display import get_notation, set_notation
 
 from .special import (
     # Gamma and related
@@ -856,6 +859,108 @@ class BoundFunction:
         delim_start, delim_end = (r"\[", r"\]") if display else (r"\(", r"\)")
         html = f'<div class="cm-math cm-math-{justify}" style="line-height: 1.5;">{delim_start} {full_latex} {delim_end}</div>'
         views.html(html)
+
+    # =========================================================================
+    # Arithmetic operators — combine BoundFunctions into new BoundFunctions
+    # =========================================================================
+
+    @staticmethod
+    def _make_combined(expr: Expr, *sources: 'BoundFunction') -> 'BoundFunction':
+        """Create a new BoundFunction with the given expression and merged params."""
+        result = BoundFunction.__new__(BoundFunction)
+        result._func = sources[0]._func
+        merged = {}
+        for src in sources:
+            merged.update(src._hyperparam_values)
+        result._hyperparam_values = merged
+        result._bound_expr = expr
+        return result
+
+    def _coerce_other(self, other):
+        """Convert other operand to an Expr, or return NotImplemented."""
+        if isinstance(other, BoundFunction):
+            return other._bound_expr, other
+        if isinstance(other, Expr):
+            return other, None
+        if isinstance(other, (int, float)):
+            return Const(other), None
+        return NotImplemented, None
+
+    def __add__(self, other):
+        other_expr, other_bf = self._coerce_other(other)
+        if other_expr is NotImplemented:
+            return NotImplemented
+        sources = (self, other_bf) if other_bf else (self,)
+        return BoundFunction._make_combined(Add(self._bound_expr, other_expr), *sources)
+
+    def __radd__(self, other):
+        other_expr, other_bf = self._coerce_other(other)
+        if other_expr is NotImplemented:
+            return NotImplemented
+        sources = (self, other_bf) if other_bf else (self,)
+        return BoundFunction._make_combined(Add(other_expr, self._bound_expr), *sources)
+
+    def __sub__(self, other):
+        other_expr, other_bf = self._coerce_other(other)
+        if other_expr is NotImplemented:
+            return NotImplemented
+        sources = (self, other_bf) if other_bf else (self,)
+        return BoundFunction._make_combined(Sub(self._bound_expr, other_expr), *sources)
+
+    def __rsub__(self, other):
+        other_expr, other_bf = self._coerce_other(other)
+        if other_expr is NotImplemented:
+            return NotImplemented
+        sources = (self, other_bf) if other_bf else (self,)
+        return BoundFunction._make_combined(Sub(other_expr, self._bound_expr), *sources)
+
+    def __mul__(self, other):
+        other_expr, other_bf = self._coerce_other(other)
+        if other_expr is NotImplemented:
+            return NotImplemented
+        sources = (self, other_bf) if other_bf else (self,)
+        return BoundFunction._make_combined(Mul(self._bound_expr, other_expr), *sources)
+
+    def __rmul__(self, other):
+        other_expr, other_bf = self._coerce_other(other)
+        if other_expr is NotImplemented:
+            return NotImplemented
+        sources = (self, other_bf) if other_bf else (self,)
+        return BoundFunction._make_combined(Mul(other_expr, self._bound_expr), *sources)
+
+    def __truediv__(self, other):
+        other_expr, other_bf = self._coerce_other(other)
+        if other_expr is NotImplemented:
+            return NotImplemented
+        sources = (self, other_bf) if other_bf else (self,)
+        return BoundFunction._make_combined(Div(self._bound_expr, other_expr), *sources)
+
+    def __rtruediv__(self, other):
+        other_expr, other_bf = self._coerce_other(other)
+        if other_expr is NotImplemented:
+            return NotImplemented
+        sources = (self, other_bf) if other_bf else (self,)
+        return BoundFunction._make_combined(Div(other_expr, self._bound_expr), *sources)
+
+    def __pow__(self, other):
+        other_expr, other_bf = self._coerce_other(other)
+        if other_expr is NotImplemented:
+            return NotImplemented
+        sources = (self, other_bf) if other_bf else (self,)
+        return BoundFunction._make_combined(Pow(self._bound_expr, other_expr), *sources)
+
+    def __rpow__(self, other):
+        other_expr, other_bf = self._coerce_other(other)
+        if other_expr is NotImplemented:
+            return NotImplemented
+        sources = (self, other_bf) if other_bf else (self,)
+        return BoundFunction._make_combined(Pow(other_expr, self._bound_expr), *sources)
+
+    def __neg__(self):
+        return BoundFunction._make_combined(Neg(self._bound_expr), self)
+
+    def __pos__(self):
+        return self
 
     def __repr__(self):
         params = ", ".join(f"{k}={v}" for k, v in self._hyperparam_values.items())

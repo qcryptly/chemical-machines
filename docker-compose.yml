@@ -4,7 +4,6 @@ services:
       context: .
       dockerfile: Dockerfile.dev
     container_name: chemical-machines
-    runtime: nvidia
     # user: "${UID:-1000}:${GID:-1000}"
     environment:
       - NVIDIA_VISIBLE_DEVICES=all

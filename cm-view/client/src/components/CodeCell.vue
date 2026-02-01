@@ -2035,46 +2035,88 @@ function convertJediCompletion(jediComp) {
 
 // Smart Python completion that detects context and fetches dynamic completions
 async function pythonCompleter(context) {
+  const doc = context.state.doc.toString()
+  const pos = context.pos
+
+  // Get the current line text up to the cursor
+  const line = context.state.doc.lineAt(pos)
+  const lineTextToCursor = line.text.slice(0, pos - line.from)
+
+  // Detect import context: "from X import " or "from X import Y"
+  const importMatch = lineTextToCursor.match(/^(?:from\s+([\w.]+)\s+import\s+)([\w]*)$/)
+  if (importMatch && props.language === 'python') {
+    const partialName = importMatch[2]  // what user has typed after "import "
+    const completionFrom = pos - partialName.length
+
+    try {
+      const dynamicResults = await fetchDynamicCompletions(doc, pos)
+      if (dynamicResults.length > 0) {
+        return {
+          from: completionFrom,
+          options: dynamicResults.map(convertJediCompletion),
+          validFor: /^[\w]*$/
+        }
+      }
+    } catch (error) {
+      console.warn('[Autocomplete] Import completion error:', error)
+    }
+    // Fallback to static completions filtered by partial name
+    const completions = getCompletions('python')
+    return {
+      from: completionFrom,
+      options: completions.filter(c =>
+        c.label.toLowerCase().startsWith(partialName.toLowerCase())
+      ),
+      validFor: /^[\w]*$/
+    }
+  }
+
+  // Detect bare import context: "import cm." or "import cm.sym"
+  const bareImportMatch = lineTextToCursor.match(/^import\s+([\w.]*\.)(\w*)$/)
+  if (bareImportMatch && props.language === 'python') {
+    const partialName = bareImportMatch[2]
+    const completionFrom = pos - partialName.length
+
+    try {
+      const dynamicResults = await fetchDynamicCompletions(doc, pos)
+      if (dynamicResults.length > 0) {
+        return {
+          from: completionFrom,
+          options: dynamicResults.map(convertJediCompletion),
+          validFor: /^[\w]*$/
+        }
+      }
+    } catch (error) {
+      console.warn('[Autocomplete] Import completion error:', error)
+    }
+  }
+
+  // Standard word/dot matching
   const word = context.matchBefore(/[\w.]*/)
   if (!word || (word.from === word.to && !context.explicit)) return null
 
   const text = word.text
-  const doc = context.state.doc.toString()
-  const pos = context.pos
 
-  // Detect if we're typing after a dot (instance method completion)
-  const needsDynamic = text.includes('.') && /\w+\.$/.test(text)
-
-  // Debug logging
-  if (needsDynamic) {
-    console.log('[Autocomplete] Dynamic completion triggered', { text, pos, language: props.language })
-  }
+  // Detect if we're typing after a dot (instance/module attribute completion)
+  const needsDynamic = text.includes('.') && /\w+\.\w*$/.test(text)
 
   let options = []
-  let completionFrom = word.from  // Default to start of word
+  let completionFrom = word.from
 
-  // Try dynamic completion for instance methods
+  // Try dynamic completion for dot access (obj. or module.)
   if (needsDynamic && props.language === 'python') {
     try {
-      console.log('[Autocomplete] Fetching dynamic completions...')
       const dynamicResults = await fetchDynamicCompletions(doc, pos)
-      console.log('[Autocomplete] Got dynamic results:', dynamicResults.length)
 
       if (dynamicResults.length > 0) {
-        // Convert jedi completions to CodeMirror format
         const dynamicOptions = dynamicResults.map(convertJediCompletion)
         options = dynamicOptions
 
-        // For dynamic completion after a dot, set 'from' to be after the dot
-        // So typing "obj." will complete from the position after the dot
+        // Set 'from' to be after the last dot
         const dotIndex = text.lastIndexOf('.')
         if (dotIndex !== -1) {
           completionFrom = word.from + dotIndex + 1
         }
-
-        console.log('[Autocomplete] Using dynamic options:', dynamicOptions.length)
-        console.log('[Autocomplete] Sample options:', dynamicOptions.slice(0, 3))
-        console.log('[Autocomplete] Completion from position:', completionFrom, 'vs word.from:', word.from)
       }
     } catch (error) {
       console.warn('[Autocomplete] Dynamic completion error:', error)
@@ -2094,13 +2136,12 @@ async function pythonCompleter(context) {
       const mathPattern = new RegExp(`${varName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*=\\s*Math\\(`, 'm')
 
       if (mathPattern.test(beforeCursor)) {
-        // This is a Math instance - show Math methods
         const filtered = mathMethodCompletions.filter(c =>
           c.label.toLowerCase().startsWith(methodPrefix.toLowerCase())
         )
         if (filtered.length > 0) {
           return {
-            from: word.from + varName.length + 1,  // After the dot
+            from: word.from + varName.length + 1,
             options: filtered
           }
         }
@@ -2114,19 +2155,11 @@ async function pythonCompleter(context) {
     )
   }
 
-  const result = {
+  return {
     from: completionFrom,
     options,
     validFor: /^[\w.]*$/
   }
-
-  console.log('[Autocomplete] Returning result:', {
-    from: result.from,
-    optionsCount: result.options.length,
-    text
-  })
-
-  return result
 }
 
 function createEditor() {
@@ -2151,6 +2184,26 @@ function createEditor() {
       activateOnTyping: true,
       maxRenderedOptions: 20,
     }),
+    // Trigger autocomplete on space/dot in import contexts (CM6 skips whitespace by default)
+    props.language === 'python' ? EditorView.updateListener.of(update => {
+      if (!update.docChanged) return
+      update.transactions.forEach(tr => {
+        if (!tr.isUserEvent('input')) return
+        tr.changes.iterChanges((_fromA, _toA, fromB, _toB, inserted) => {
+          const text = inserted.toString()
+          if (text !== ' ' && text !== '.') return
+          const pos = fromB + text.length
+          const line = update.state.doc.lineAt(pos)
+          const lineText = line.text.slice(0, pos - line.from)
+          // Trigger on space after "from X import" or dot in "import X." / "from X."
+          if (text === ' ' && /(?:from\s+[\w.]+\s+import|import)\s$/.test(lineText)) {
+            setTimeout(() => startCompletion(update.view), 0)
+          } else if (text === '.' && /(?:from\s+[\w.]+\.|import\s+[\w.]+\.)$/.test(lineText)) {
+            setTimeout(() => startCompletion(update.view), 0)
+          }
+        })
+      })
+    }) : [],
     keymap.of([
       {
         key: 'Mod-Enter',

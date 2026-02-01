@@ -1128,6 +1128,10 @@ def molecule(
     """
     import numpy as np
 
+    # Normalize to flat (elem, x, y, z) format
+    if atoms and isinstance(atoms[0][1], (tuple, list, np.ndarray)):
+        atoms = [(a[0], float(a[1][0]), float(a[1][1]), float(a[1][2])) for a in atoms]
+
     n_atoms = len(atoms)
     positions = np.array([[a[1], a[2], a[3]] for a in atoms])
     elements = [a[0] for a in atoms]
@@ -1655,7 +1659,7 @@ def orbital(
     import numpy as np
 
     # Import orbital extraction functions
-    from cm.qm.integrals.orbital import (
+    from cm.qm.integrals.visualization.orbital import (
         extract_orbital_isosurface,
         create_orbital_grid
     )

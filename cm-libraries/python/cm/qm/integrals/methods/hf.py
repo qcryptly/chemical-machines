@@ -80,6 +80,10 @@ class HFResult:
     atoms: List[Tuple[str, Tuple[float, float, float]]] = None
     n_electrons: int = 0
 
+    # Basis set info (for downstream properties)
+    basis: object = None
+    basis_name: str = ''
+
 
 class HartreeFockSolver:
     """
@@ -299,7 +303,9 @@ class HartreeFockSolver:
             E_exchange=E_exchange,
             E_nuclear_repulsion=E_nuc,
             atoms=atoms,
-            n_electrons=n_electrons
+            n_electrons=n_electrons,
+            basis=basis,
+            basis_name=self.basis_name
         )
 
     def _nuclear_repulsion(self, nuclei: List[Tuple[np.ndarray, float]]) -> float:

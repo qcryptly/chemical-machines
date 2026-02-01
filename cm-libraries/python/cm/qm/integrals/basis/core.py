@@ -12,10 +12,16 @@ Contracted Gaussians are linear combinations:
     φ(r) = Σ_p c_p g_p(r)
 """
 
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, NamedTuple
 from dataclasses import dataclass
 import numpy as np
 import math
+
+
+class PrimitiveInfo(NamedTuple):
+    """Primitive Gaussian info with named access."""
+    coefficient: float
+    exponent: float
 
 from .sto3g import STO_3G_DATA
 from .cc_pvtz import CC_PVTZ_DATA
@@ -224,12 +230,27 @@ class BasisFunction:
     m: int = 0
 
     @property
-    def center(self) -> Tuple[float, float, float]:
-        return self.cgf.center
+    def center(self) -> np.ndarray:
+        return np.array(self.cgf.center)
 
     @property
     def angular(self) -> Tuple[int, int, int]:
         return self.cgf.angular
+
+    @property
+    def angular_momentum(self) -> Tuple[int, int, int]:
+        """Alias for angular (used by property modules)."""
+        return self.cgf.angular
+
+    @property
+    def primitives(self) -> List[PrimitiveInfo]:
+        """Primitives as named tuples with .coefficient and .exponent."""
+        return [PrimitiveInfo(c, e) for c, e in self.cgf.primitives]
+
+    @property
+    def l(self) -> int:
+        """Angular momentum quantum number (lowercase alias)."""
+        return self.cgf.L
 
     @property
     def L(self) -> int:
@@ -395,6 +416,11 @@ class BasisSet:
                             shell_type='g',
                             m=m
                         ))
+
+    @property
+    def basis_functions(self) -> list:
+        """Alias for self.functions (used by property modules)."""
+        return self.functions
 
     @property
     def n_basis(self) -> int:

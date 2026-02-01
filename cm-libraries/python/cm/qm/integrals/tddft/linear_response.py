@@ -289,7 +289,7 @@ def _build_B_matrix(eps: np.ndarray, G_mo: np.ndarray,
 
 def _transform_eri(C: np.ndarray, G_ao: np.ndarray) -> np.ndarray:
     """Transform ERI from AO to MO basis."""
-    return np.einsum('mp,nq,mnls,lr,ss2->pqrs2',
+    return np.einsum('mp,nq,mnls,lr,su->pqru',
                      C, C, G_ao, C, C, optimize=True)
 
 

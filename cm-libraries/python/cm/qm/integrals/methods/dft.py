@@ -92,6 +92,10 @@ class DFTResult:
     atoms: List[Tuple[str, Tuple[float, float, float]]] = None
     n_electrons: int = 0
 
+    # Basis set info (for downstream properties)
+    basis: object = None
+    basis_name: str = ''
+
 
 class KohnShamSolver:
     """
@@ -364,7 +368,9 @@ class KohnShamSolver:
             functional_name=self.functional_name,
             exact_exchange_fraction=exact_exchange,
             atoms=atoms,
-            n_electrons=n_electrons
+            n_electrons=n_electrons,
+            basis=basis,
+            basis_name=self.basis_name
         )
 
     def _compute_xc_on_grid(self, P: np.ndarray, basis: BasisSet,

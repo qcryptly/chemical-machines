@@ -258,7 +258,7 @@ def mp2(hf_result: HFResult = None,
 
     # Transform ERI: (μν|λσ) -> (pq|rs)
     # This is the expensive step: O(N^5)
-    mo_eri = np.einsum('mp,nq,mnls,lr,ss2->pqrs2',
+    mo_eri = np.einsum('mp,nq,mnls,lr,su->pqru',
                        C, C, G_ao, C, C, optimize=True)
 
     # Compute MP2 energy

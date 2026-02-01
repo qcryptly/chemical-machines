@@ -82,8 +82,14 @@ def dipole_moment(result: Union[HFResult, DFTResult],
     # Electronic contribution: μ_elec = -Tr[P D]
     # D_μν = <μ|r|ν> are dipole integrals
     # Simplified: use expectation value of position operator
-    basis = BasisSet('STO-3G')  # Should match calculation
-    basis.build_for_molecule(atoms)
+    if hasattr(result, 'basis') and result.basis is not None:
+        basis = result.basis
+    elif hasattr(result, 'basis_name') and result.basis_name:
+        basis = BasisSet(result.basis_name)
+        basis.build_for_molecule(atoms)
+    else:
+        basis = BasisSet('STO-3G')
+        basis.build_for_molecule(atoms)
 
     D_x, D_y, D_z = _compute_dipole_integrals(basis)
 

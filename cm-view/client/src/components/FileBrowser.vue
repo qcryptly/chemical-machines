@@ -178,9 +178,11 @@ function fileApiUrl(filePath = '') {
   return filePath ? `${base}/${encodeURIComponent(filePath)}` : base
 }
 
-async function refresh() {
-  loading.value = true
-  error.value = null
+async function refresh(silent = false) {
+  if (!silent) {
+    loading.value = true
+    error.value = null
+  }
   try {
     const response = await axios.get(fileApiUrl(), {
       params: {
@@ -189,11 +191,14 @@ async function refresh() {
       }
     })
     files.value = response.data.items || []
+    if (!silent) error.value = null
   } catch (err) {
-    error.value = err.response?.data?.error || err.message
-    files.value = []
+    if (!silent) {
+      error.value = err.response?.data?.error || err.message
+      files.value = []
+    }
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -584,13 +589,26 @@ function handleRootDrop(event) {
   }
 }
 
+// Auto-refresh polling to pick up new files created externally
+let pollInterval = null
+
 onMounted(() => {
   refresh()
   document.addEventListener('click', hideContextMenu)
+  // Poll every 3 seconds for file changes (only when tab is visible)
+  pollInterval = setInterval(() => {
+    if (!document.hidden) {
+      refresh(true)
+    }
+  }, 3000)
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', hideContextMenu)
+  if (pollInterval) {
+    clearInterval(pollInterval)
+    pollInterval = null
+  }
 })
 
 // Expose refresh method for parent components

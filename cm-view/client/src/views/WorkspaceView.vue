@@ -3,6 +3,9 @@
     <!-- Left Sidebar with Tabs -->
     <div class="left-sidebar" :class="{ collapsed: !sidebarOpen }" :style="{ width: sidebarOpen ? sidebarWidth + 'px' : '40px' }">
       <div class="sidebar-header">
+        <button class="home-btn" @click="router.push('/')" title="Back to workspaces">
+          <Home :size="14" />
+        </button>
         <div class="sidebar-tabs" v-if="sidebarOpen">
           <button
             :class="{ active: sidebarTab === 'files' }"
@@ -28,7 +31,7 @@
       </div>
 
       <!-- File Browser Tab -->
-      <div class="sidebar-content" v-if="sidebarOpen && sidebarTab === 'files'">
+      <div class="sidebar-content" v-show="sidebarOpen && sidebarTab === 'files'">
         <FileBrowser
           ref="fileBrowserRef"
           :workspace-id="workspaceId"
@@ -38,7 +41,7 @@
       </div>
 
       <!-- Environments Tab -->
-      <div class="sidebar-content env-panel" v-if="sidebarOpen && sidebarTab === 'envs'">
+      <div class="sidebar-content env-panel" v-show="sidebarOpen && sidebarTab === 'envs'">
         <!-- Sub-tabs for Python/C++ -->
         <div class="env-sub-tabs">
           <button
@@ -199,10 +202,6 @@
       <div class="notebook-panel">
         <!-- Mode Toggle Bar -->
         <div class="mode-toggle-bar">
-          <button class="home-btn" @click="router.push('/')" title="Back to workspaces">
-            <Home :size="14" />
-            <span class="home-label">Home</span>
-          </button>
           <div class="mode-tabs">
             <button
               :class="{ active: bottomPanelMode === 'editor' }"
@@ -319,8 +318,8 @@
         </div>
         </template>
 
-        <!-- Terminal View -->
-        <div class="terminal-view" v-if="bottomPanelMode === 'terminal'">
+        <!-- Terminal View (v-show to preserve session across mode switches) -->
+        <div class="terminal-view" v-show="bottomPanelMode === 'terminal'">
           <Terminal
             ref="terminalRef"
             :workspace-id="workspaceId"

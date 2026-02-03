@@ -221,15 +221,6 @@
               Terminal
             </button>
           </div>
-          <!-- Split toggle (only in editor mode) -->
-          <button
-            v-if="bottomPanelMode === 'editor'"
-            class="split-toggle-btn"
-            @click="handleSplit"
-            :title="splitDirection ? 'Unsplit editor' : 'Split editor'"
-          >
-            <Columns2 :size="12" />
-          </button>
           <div class="toolbar-spacer"></div>
           <!-- Editor controls (only shown in editor mode) -->
           <div class="toolbar-actions" v-if="bottomPanelMode === 'editor'">
@@ -308,39 +299,23 @@
 
         <!-- Editor View -->
         <template v-if="bottomPanelMode === 'editor'">
-        <div
-          class="editor-groups-container"
-          :class="{
-            'split-h': splitDirection === 'horizontal',
-            'split-v': splitDirection === 'vertical'
-          }"
-        >
-          <template v-for="(group, gIdx) in editorGroups" :key="group.id">
-            <!-- Split resize handle between groups -->
-            <div
-              v-if="gIdx > 0"
-              class="split-resize-handle"
-              :class="splitDirection === 'horizontal' ? 'handle-col' : 'handle-row'"
-              @pointerdown="startSplitResize"
-            ></div>
-            <EditorGroup
-              :group="group"
-              :group-index="gIdx"
-              :is-focused="gIdx === focusedGroupIndex"
-              :style="getGroupStyle(gIdx)"
-              @focus="focusedGroupIndex = gIdx"
-              @switch-tab="switchTabInGroup(gIdx, $event)"
-              @close-tab="closeTabInGroup(gIdx, $event)"
-              @split="handleSplit"
-              @update-cell="handleGroupCellUpdate(gIdx, $event)"
-              @run-cell="handleGroupCellRun(gIdx, $event)"
-              @delete-cell="handleGroupCellDelete(gIdx, $event)"
-              @create-cell-below="handleGroupCellCreateBelow(gIdx, $event)"
-              @reorder-cells="handleGroupCellReorder(gIdx, $event)"
-              @interrupt-cell="handleGroupCellInterrupt(gIdx, $event)"
-              @tab-drop-from-group="moveTabBetweenGroups($event.fromGroup, $event.fromTab, gIdx, $event.toTab)"
-            />
-          </template>
+        <div class="editor-groups-container">
+          <SplitPane
+            :node="layoutRoot"
+            :focused-leaf-id="focusedLeafId"
+            @focus-leaf="focusedLeafId = $event"
+            @switch-tab="switchTabInLeaf($event.leafId, $event.tabIndex)"
+            @close-tab="closeTabInLeaf($event.leafId, $event.tabIndex)"
+            @split="handleSplit($event.leafId, $event.direction)"
+            @update-cell="handleLeafCellUpdate($event)"
+            @run-cell="handleLeafCellRun($event)"
+            @delete-cell="handleLeafCellDelete($event)"
+            @create-cell-below="handleLeafCellCreateBelow($event)"
+            @reorder-cells="handleLeafCellReorder($event)"
+            @interrupt-cell="handleLeafCellInterrupt($event)"
+            @tab-drop="handleTabDrop($event)"
+            @resize-start="handleResizeStart($event)"
+          />
         </div>
         </template>
 
@@ -456,6 +431,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import EditorGroup from '../components/EditorGroup.vue'
+import SplitPane from '../components/SplitPane.vue'
 import FileBrowser from '../components/FileBrowser.vue'
 import CppEnvironmentDialog from '../components/CppEnvironmentDialog.vue'
 import VendorEnvironmentDialog from '../components/VendorEnvironmentDialog.vue'
@@ -587,30 +563,34 @@ const isCreating = ref(false)
 const logOutput = ref(null)
 const dialogExpanded = ref(false)
 
-// ================== Editor Groups (Split View) ==================
-let nextGroupId = 1
-const editorGroups = ref([
-  { id: 0, tabs: [], activeTabIndex: -1 }
-])
-const focusedGroupIndex = ref(0)
-const splitDirection = ref(null) // null | 'horizontal' | 'vertical'
-const splitRatio = ref(0.5)
+// ================== Editor Layout Tree (Split View) ==================
+import { useLayoutTree } from '../composables/useLayoutTree.js'
 
-// Convenience: focused group
-const focusedGroup = computed(() => editorGroups.value[focusedGroupIndex.value])
+const {
+  root: layoutRoot,
+  focusedLeafId,
+  focusedLeaf,
+  findNode,
+  getAllLeaves,
+  findLeafById,
+  splitLeaf,
+  removeLeaf,
+  updateSizes,
+  moveTab
+} = useLayoutTree()
 
-// Helper to get the active tab from the focused group
+// Helper to get the active tab from the focused leaf
 function _focusedTab() {
-  const g = focusedGroup.value
+  const g = focusedLeaf.value
   if (!g || g.activeTabIndex < 0 || g.activeTabIndex >= g.tabs.length) return null
   return g.tabs[g.activeTabIndex]
 }
 
 // Legacy aliases so existing code keeps working
-const openTabs = computed(() => focusedGroup.value?.tabs || [])
+const openTabs = computed(() => focusedLeaf.value?.tabs || [])
 const activeTabIndex = computed({
-  get: () => focusedGroup.value?.activeTabIndex ?? -1,
-  set: (v) => { if (focusedGroup.value) focusedGroup.value.activeTabIndex = v }
+  get: () => focusedLeaf.value?.activeTabIndex ?? -1,
+  set: (v) => { if (focusedLeaf.value) focusedLeaf.value.activeTabIndex = v }
 })
 
 // Computed properties for current file (reads from focused group)
@@ -1046,14 +1026,16 @@ function getLanguageFromExt(filename) {
  * - Regular .py files are single-file
  * - Bash .sh files use cells
  */
-function shouldUseCells(filename) {
+function shouldUseCells(filename, content = '') {
   const lower = filename.toLowerCase()
-  // .cell.cpp and .cell.py files use cell processing
+  // .cell.cpp and .cell.py files always use cell processing
   if (lower.endsWith('.cell.cpp') || lower.endsWith('.cell.py')) return true
   // .hpp and regular .cpp/.c/.h are single file
   if (lower.endsWith('.hpp') || lower.endsWith('.cpp') || lower.endsWith('.c') || lower.endsWith('.h')) return false
-  // Regular .py files are single file (can be imported as modules)
-  if (lower.endsWith('.py')) return false
+  // Regular .py files: auto-detect cell delimiters in content
+  if (lower.endsWith('.py')) {
+    return content.split('\n').some(line => /^# %%/.test(line))
+  }
   // Bash .sh files use cells
   if (lower.endsWith('.sh')) return true
   // Default to single file
@@ -1186,123 +1168,69 @@ async function saveFile() {
  */
 function closeFile() {
   if (activeTabIndex.value >= 0) {
-    closeTabInGroup(focusedGroupIndex.value, activeTabIndex.value)
+    closeTabInLeaf(focusedLeafId.value, activeTabIndex.value)
   }
 }
 
 /**
- * Switch to a tab within a specific group
+ * Switch to a tab within a specific leaf
  */
-function switchTabInGroup(groupIndex, index) {
-  const group = editorGroups.value[groupIndex]
-  if (!group || index < 0 || index >= group.tabs.length) return
-  group.activeTabIndex = index
-  focusedGroupIndex.value = groupIndex
+function switchTabInLeaf(leafId, index) {
+  const leaf = findLeafById(leafId)
+  if (!leaf || index < 0 || index >= leaf.tabs.length) return
+  leaf.activeTabIndex = index
+  focusedLeafId.value = leafId
 }
 
 /**
- * Close a tab within a specific group
+ * Close a tab within a specific leaf
  */
-function closeTabInGroup(groupIndex, index) {
-  const group = editorGroups.value[groupIndex]
-  if (!group || index < 0 || index >= group.tabs.length) return
+function closeTabInLeaf(leafId, index) {
+  const leaf = findLeafById(leafId)
+  if (!leaf || index < 0 || index >= leaf.tabs.length) return
 
-  const tab = group.tabs[index]
+  const tab = leaf.tabs[index]
   if (tab.isDirty) {
     if (!confirm(`"${tab.name}" has unsaved changes. Close anyway?`)) return
   }
 
-  group.tabs.splice(index, 1)
+  leaf.tabs.splice(index, 1)
 
-  if (group.tabs.length === 0) {
-    group.activeTabIndex = -1
-    // Auto-close empty split groups (keep at least 1)
-    if (editorGroups.value.length > 1) {
-      editorGroups.value.splice(groupIndex, 1)
-      splitDirection.value = null
-      focusedGroupIndex.value = 0
-    }
-  } else if (index <= group.activeTabIndex) {
-    group.activeTabIndex = Math.max(0, group.activeTabIndex - 1)
+  if (leaf.tabs.length === 0) {
+    leaf.activeTabIndex = -1
+    removeLeaf(leafId)
+  } else if (index <= leaf.activeTabIndex) {
+    leaf.activeTabIndex = Math.max(0, leaf.activeTabIndex - 1)
   }
 }
 
 // ================== Split Editor Functions ==================
 
-function splitEditor(direction) {
-  if (editorGroups.value.length >= 2) return
-  splitDirection.value = direction
-  editorGroups.value.push({ id: nextGroupId++, tabs: [], activeTabIndex: -1 })
-}
-
-function unsplitEditor() {
-  if (editorGroups.value.length <= 1) return
-  const secondary = editorGroups.value[1]
-  editorGroups.value[0].tabs.push(...secondary.tabs)
-  editorGroups.value.splice(1, 1)
-  splitDirection.value = null
-  focusedGroupIndex.value = 0
-}
-
-function handleSplit() {
-  if (editorGroups.value.length >= 2) {
-    unsplitEditor()
-  } else {
-    splitEditor('horizontal')
+function handleSplit(leafId, direction) {
+  const newLeafId = splitLeaf(leafId, direction)
+  if (newLeafId != null) {
+    focusedLeafId.value = newLeafId
   }
 }
 
-function moveTabBetweenGroups(fromGroupIndex, fromTabIndex, toGroupIndex, toTabIndex) {
-  const fromGroup = editorGroups.value[fromGroupIndex]
-  if (!fromGroup || fromTabIndex < 0 || fromTabIndex >= fromGroup.tabs.length) return
-
-  const [tab] = fromGroup.tabs.splice(fromTabIndex, 1)
-
-  // Adjust source active index
-  if (fromGroup.tabs.length === 0) {
-    fromGroup.activeTabIndex = -1
-  } else if (fromTabIndex <= fromGroup.activeTabIndex) {
-    fromGroup.activeTabIndex = Math.max(0, fromGroup.activeTabIndex - 1)
-  }
-
-  const toGroup = editorGroups.value[toGroupIndex]
-  const insertAt = toTabIndex >= 0 ? Math.min(toTabIndex, toGroup.tabs.length) : toGroup.tabs.length
-  toGroup.tabs.splice(insertAt, 0, tab)
-  toGroup.activeTabIndex = insertAt
-  focusedGroupIndex.value = toGroupIndex
-
-  // Auto-close empty split groups
-  if (fromGroup.tabs.length === 0 && editorGroups.value.length > 1) {
-    const removeIdx = editorGroups.value.indexOf(fromGroup)
-    if (removeIdx >= 0) {
-      editorGroups.value.splice(removeIdx, 1)
-      splitDirection.value = null
-      focusedGroupIndex.value = 0
-    }
-  }
-}
-
-function getGroupStyle(groupIndex) {
-  if (editorGroups.value.length === 1) return { flex: '1' }
-  const ratio = groupIndex === 0 ? splitRatio.value : (1 - splitRatio.value)
-  return { flex: `0 0 ${ratio * 100}%` }
+function handleTabDrop({ fromGroupId, fromTab, toGroupId, toTab }) {
+  moveTab(fromGroupId, fromTab, toGroupId, toTab)
 }
 
 // ================== Split Resize ==================
 
-let isSplitResizing = false
-let splitResizeContainer = null
+let resizingState = null
 
-function startSplitResize(e) {
-  e.preventDefault()
-  isSplitResizing = true
-  splitResizeContainer = e.target.parentElement
+function handleResizeStart({ event, splitId, childIndex, direction }) {
+  event.preventDefault()
+  const container = event.target.parentElement
+  resizingState = { splitId, childIndex, direction, container }
 
   const overlay = document.createElement('div')
   overlay.id = 'split-resize-overlay'
   overlay.style.cssText = `
     position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-    z-index: 9999; cursor: ${splitDirection.value === 'horizontal' ? 'col-resize' : 'row-resize'};
+    z-index: 9999; cursor: ${direction === 'horizontal' ? 'col-resize' : 'row-resize'};
   `
   document.body.appendChild(overlay)
 
@@ -1310,26 +1238,51 @@ function startSplitResize(e) {
   document.addEventListener('pointerup', stopSplitResize)
   document.addEventListener('pointercancel', stopSplitResize)
   document.body.style.userSelect = 'none'
-  document.body.style.cursor = splitDirection.value === 'horizontal' ? 'col-resize' : 'row-resize'
+  document.body.style.cursor = direction === 'horizontal' ? 'col-resize' : 'row-resize'
 }
 
 function doSplitResize(e) {
-  if (!isSplitResizing || !splitResizeContainer) return
+  if (!resizingState) return
   e.preventDefault()
-  const rect = splitResizeContainer.getBoundingClientRect()
-  let ratio
-  if (splitDirection.value === 'horizontal') {
-    ratio = (e.clientX - rect.left) / rect.width
+  const { splitId, childIndex, direction, container } = resizingState
+  const rect = container.getBoundingClientRect()
+
+  const splitNode = findNode(layoutRoot.value, splitId)
+  if (!splitNode || splitNode.type !== 'split') return
+
+  // Calculate position as percentage within container
+  let position
+  if (direction === 'horizontal') {
+    position = (e.clientX - rect.left) / rect.width * 100
   } else {
-    ratio = (e.clientY - rect.top) / rect.height
+    position = (e.clientY - rect.top) / rect.height * 100
   }
-  splitRatio.value = Math.max(0.15, Math.min(0.85, ratio))
+
+  // The handle at childIndex separates children[childIndex-1] and children[childIndex]
+  const prevIdx = childIndex - 1
+  const combinedSize = splitNode.sizes[prevIdx] + splitNode.sizes[childIndex]
+
+  // Cumulative sizes before the pair being resized
+  let cumulativeBefore = 0
+  for (let i = 0; i < prevIdx; i++) cumulativeBefore += splitNode.sizes[i]
+
+  let newPrevSize = position - cumulativeBefore
+  let newCurrSize = combinedSize - newPrevSize
+
+  // Enforce minimum sizes (15% of combined or 5% absolute)
+  const minSize = Math.max(5, combinedSize * 0.15)
+  newPrevSize = Math.max(minSize, Math.min(combinedSize - minSize, newPrevSize))
+  newCurrSize = combinedSize - newPrevSize
+
+  const newSizes = [...splitNode.sizes]
+  newSizes[prevIdx] = newPrevSize
+  newSizes[childIndex] = newCurrSize
+  updateSizes(splitId, newSizes)
 }
 
 function stopSplitResize() {
-  if (!isSplitResizing) return
-  isSplitResizing = false
-  splitResizeContainer = null
+  if (!resizingState) return
+  resizingState = null
 
   const overlay = document.getElementById('split-resize-overlay')
   if (overlay && overlay.parentNode) {
@@ -1343,37 +1296,37 @@ function stopSplitResize() {
   document.body.style.cursor = ''
 }
 
-// ================== Group-aware Cell Handlers ==================
+// ================== Leaf-aware Cell Handlers ==================
 // These route events from EditorGroup components to existing cell functions
-// by temporarily ensuring the correct group is focused.
+// by temporarily ensuring the correct leaf is focused.
 
-function _withGroup(groupIndex, fn) {
-  focusedGroupIndex.value = groupIndex
+function _withLeaf(leafId, fn) {
+  focusedLeafId.value = leafId
   fn()
 }
 
-function handleGroupCellUpdate(groupIndex, { cellIndex, data }) {
-  _withGroup(groupIndex, () => updateCell(cellIndex, data))
+function handleLeafCellUpdate({ leafId, cellIndex, data }) {
+  _withLeaf(leafId, () => updateCell(cellIndex, data))
 }
 
-function handleGroupCellRun(groupIndex, cellIndex) {
-  _withGroup(groupIndex, () => executeCell(cellIndex))
+function handleLeafCellRun({ leafId, cellIndex }) {
+  _withLeaf(leafId, () => executeCell(cellIndex))
 }
 
-function handleGroupCellDelete(groupIndex, cellIndex) {
-  _withGroup(groupIndex, () => deleteCell(cellIndex))
+function handleLeafCellDelete({ leafId, cellIndex }) {
+  _withLeaf(leafId, () => deleteCell(cellIndex))
 }
 
-function handleGroupCellCreateBelow(groupIndex, cellIndex) {
-  _withGroup(groupIndex, () => createCellBelow(cellIndex))
+function handleLeafCellCreateBelow({ leafId, cellIndex }) {
+  _withLeaf(leafId, () => createCellBelow(cellIndex))
 }
 
-function handleGroupCellReorder(groupIndex, payload) {
-  _withGroup(groupIndex, () => reorderCells(payload))
+function handleLeafCellReorder({ leafId, payload }) {
+  _withLeaf(leafId, () => reorderCells(payload))
 }
 
-function handleGroupCellInterrupt(groupIndex, cellIndex) {
-  _withGroup(groupIndex, () => interruptCell(cellIndex))
+function handleLeafCellInterrupt({ leafId, cellIndex }) {
+  _withLeaf(leafId, () => interruptCell(cellIndex))
 }
 
 function addCell() {
@@ -1764,12 +1717,13 @@ async function openFile(file) {
     // Switch to editor mode when opening a file
     bottomPanelMode.value = 'editor'
 
-    // Check if file is already open in any group
-    for (let g = 0; g < editorGroups.value.length; g++) {
-      const existingIndex = editorGroups.value[g].tabs.findIndex(tab => tab.path === file.path)
+    // Check if file is already open in any leaf
+    const allLeaves = getAllLeaves()
+    for (const leaf of allLeaves) {
+      const existingIndex = leaf.tabs.findIndex(tab => tab.path === file.path)
       if (existingIndex >= 0) {
-        editorGroups.value[g].activeTabIndex = existingIndex
-        focusedGroupIndex.value = g
+        leaf.activeTabIndex = existingIndex
+        focusedLeafId.value = leaf.id
         return
       }
     }
@@ -1778,7 +1732,7 @@ async function openFile(file) {
     if (response.data.type === 'file') {
       const language = getLanguageFromExt(file.name)
       const content = response.data.content || ''
-      const useCells = shouldUseCells(file.name)
+      const useCells = shouldUseCells(file.name, content)
 
       let fileCells
       if (useCells) {
@@ -1804,8 +1758,8 @@ async function openFile(file) {
       // Check if this is a markdown file
       const isMarkdown = file.name.toLowerCase().endsWith('.md')
 
-      // Add new tab to focused group
-      const group = focusedGroup.value
+      // Add new tab to focused leaf
+      const group = focusedLeaf.value
       group.tabs.push({
         path: file.path,
         name: file.name,
@@ -1897,24 +1851,13 @@ function handleKeydown(e) {
       saveFile()
     }
   }
-  // Ctrl+\ to toggle split horizontal, Ctrl+Shift+\ for vertical
+  // Ctrl+\ to split focused pane horizontally, Ctrl+Shift+\ for vertical
   if ((e.ctrlKey || e.metaKey) && e.key === '\\') {
     e.preventDefault()
     if (e.shiftKey) {
-      if (splitDirection.value === 'vertical') {
-        unsplitEditor()
-      } else if (splitDirection.value === 'horizontal') {
-        // Switch direction
-        splitDirection.value = 'vertical'
-      } else {
-        splitEditor('vertical')
-      }
+      handleSplit(focusedLeafId.value, 'vertical')
     } else {
-      if (splitDirection.value) {
-        unsplitEditor()
-      } else {
-        splitEditor('horizontal')
-      }
+      handleSplit(focusedLeafId.value, 'horizontal')
     }
   }
 }
@@ -2639,54 +2582,6 @@ onUnmounted(() => {
   position: relative;
 }
 
-.editor-groups-container.split-h {
-  flex-direction: row;
-}
-
-.editor-groups-container.split-v {
-  flex-direction: column;
-}
-
-.split-resize-handle {
-  flex-shrink: 0;
-  background: var(--border);
-  transition: background 0.2s;
-  z-index: 10;
-  position: relative;
-}
-
-.split-resize-handle.handle-col {
-  width: 4px;
-  cursor: col-resize;
-}
-
-.split-resize-handle.handle-row {
-  height: 4px;
-  cursor: row-resize;
-}
-
-.split-resize-handle:hover {
-  background: var(--accent);
-}
-
-.split-toggle-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.25rem 0.4rem;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all 0.15s;
-  flex-shrink: 0;
-}
-
-.split-toggle-btn:hover {
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-}
 
 /* Create Environment Dialog */
 .dialog-overlay {

@@ -7,12 +7,10 @@
  * where it is demuxed by job ID via the JobListener.
  */
 
-const fs = require('fs');
 const path = require('path');
 const { createWorkerLogger } = require('../logger');
 const { getJobHandler, hasJobType, getJobTypes } = require('./jobs');
-
-const CONDA_PATH = process.env.CONDA_PATH || '/opt/conda';
+const { getPythonPath } = require('./utils');
 
 // Worker state
 let workerId = process.env.WORKER_ID || '0';
@@ -27,24 +25,6 @@ function initLogger() {
     logger = createWorkerLogger(workerId);
     logger.info('Worker started', { workerId, pid: process.pid });
   }
-}
-
-/**
- * Get Python path for a conda environment
- * @param {string} envName - Environment name
- * @returns {string} Path to Python executable
- */
-function getPythonPath(envName) {
-  if (!envName || envName === 'base') {
-    return `${CONDA_PATH}/bin/python`;
-  }
-  const envPython = `${CONDA_PATH}/envs/${envName}/bin/python`;
-  if (fs.existsSync(envPython)) {
-    return envPython;
-  }
-  // Fallback to base if environment doesn't exist
-  console.warn(`Environment '${envName}' not found, using base`);
-  return `${CONDA_PATH}/bin/python`;
 }
 
 /**

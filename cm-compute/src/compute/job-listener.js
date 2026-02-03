@@ -48,7 +48,9 @@ class JobListener extends EventEmitter {
       stderr: [],
       progress: 0,
       subscribers: new Set(),
-      startTime: Date.now()
+      startTime: Date.now(),
+      resultMessage: null,
+      completeMessage: null
     });
 
     this.emit('job:registered', jobId);
@@ -167,6 +169,9 @@ class JobListener extends EventEmitter {
       duration: Date.now() - job.startTime
     };
 
+    // Buffer for late subscribers
+    job.resultMessage = message;
+
     job.subscribers.forEach(callback => {
       try {
         callback(message);
@@ -201,6 +206,9 @@ class JobListener extends EventEmitter {
       duration: Date.now() - job.startTime
     };
 
+    // Buffer for late subscribers
+    job.resultMessage = message;
+
     job.subscribers.forEach(callback => {
       try {
         callback(message);
@@ -229,6 +237,9 @@ class JobListener extends EventEmitter {
       duration: Date.now() - job.startTime
     };
 
+    // Buffer for late subscribers
+    job.completeMessage = message;
+
     job.subscribers.forEach(callback => {
       try {
         callback(message);
@@ -254,6 +265,18 @@ class JobListener extends EventEmitter {
     }
 
     job.subscribers.add(callback);
+
+    // Replay buffered result/complete for late subscribers (race condition fix)
+    if (job.resultMessage) {
+      try { callback(job.resultMessage); } catch (err) {
+        console.error(`Error replaying result for ${jobId}:`, err);
+      }
+    }
+    if (job.completeMessage) {
+      try { callback(job.completeMessage); } catch (err) {
+        console.error(`Error replaying complete for ${jobId}:`, err);
+      }
+    }
 
     // Return unsubscribe function
     return () => {

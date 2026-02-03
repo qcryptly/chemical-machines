@@ -28,8 +28,11 @@
         <button class="tab-close" @click.stop="$emit('close-tab', index)" title="Close"><X :size="12" /></button>
       </div>
       <div class="tab-bar-spacer"></div>
-      <button class="btn-icon split-btn" @click.stop="$emit('split')" title="Split editor">
+      <button class="btn-icon split-btn" @click.stop="$emit('split', 'horizontal')" title="Split right">
         <Columns2 :size="12" />
+      </button>
+      <button class="btn-icon split-btn" @click.stop="$emit('split', 'vertical')" title="Split down">
+        <Rows2 :size="12" />
       </button>
     </div>
 
@@ -91,13 +94,13 @@ import { ref, computed } from 'vue'
 import CodeCell from './CodeCell.vue'
 import { marked } from 'marked'
 import {
-  X, Columns2, FileCode, Settings,
+  X, Columns2, Rows2, FileCode, Settings,
   Terminal as TerminalIcon, Braces, FileText, File as LucideFile
 } from 'lucide-vue-next'
 
 const props = defineProps({
   group: { type: Object, required: true },
-  groupIndex: { type: Number, required: true },
+  groupId: { type: Number, required: true },
   isFocused: { type: Boolean, default: false }
 })
 
@@ -137,7 +140,7 @@ function onTabDragStart(event, index) {
   dragTabIndex.value = index
   event.dataTransfer.effectAllowed = 'move'
   event.dataTransfer.setData('application/x-tab-drag', JSON.stringify({
-    sourceGroup: props.groupIndex,
+    sourceGroupId: props.groupId,
     sourceTab: index
   }))
   event.target.style.opacity = '0.4'
@@ -166,12 +169,12 @@ function onTabDrop(event, targetIndex) {
     resetDragState()
     return
   }
-  const { sourceGroup, sourceTab } = JSON.parse(raw)
+  const { sourceGroupId, sourceTab } = JSON.parse(raw)
 
   let effectiveTarget = targetIndex
   if (dragInsertSide.value === 'right') effectiveTarget += 1
 
-  if (sourceGroup === props.groupIndex) {
+  if (sourceGroupId === props.groupId) {
     // Same group: reorder
     let fromIndex = sourceTab
     let toIndex = effectiveTarget
@@ -192,8 +195,9 @@ function onTabDrop(event, targetIndex) {
   } else {
     // Cross-group: emit event for parent to handle
     emit('tab-drop-from-group', {
-      fromGroup: sourceGroup,
+      fromGroupId: sourceGroupId,
       fromTab: sourceTab,
+      toGroupId: props.groupId,
       toTab: effectiveTarget
     })
   }
@@ -223,11 +227,12 @@ function onEmptyDrop(event) {
   emptyDropActive.value = false
   const raw = event.dataTransfer.getData('application/x-tab-drag')
   if (!raw) return
-  const { sourceGroup, sourceTab } = JSON.parse(raw)
-  if (sourceGroup !== props.groupIndex) {
+  const { sourceGroupId, sourceTab } = JSON.parse(raw)
+  if (sourceGroupId !== props.groupId) {
     emit('tab-drop-from-group', {
-      fromGroup: sourceGroup,
+      fromGroupId: sourceGroupId,
       fromTab: sourceTab,
+      toGroupId: props.groupId,
       toTab: 0
     })
   }
@@ -238,11 +243,12 @@ function onContentDrop(event) {
   const raw = event.dataTransfer.getData('application/x-tab-drag')
   if (!raw) return
   event.preventDefault()
-  const { sourceGroup, sourceTab } = JSON.parse(raw)
-  if (sourceGroup !== props.groupIndex) {
+  const { sourceGroupId, sourceTab } = JSON.parse(raw)
+  if (sourceGroupId !== props.groupId) {
     emit('tab-drop-from-group', {
-      fromGroup: sourceGroup,
+      fromGroupId: sourceGroupId,
       fromTab: sourceTab,
+      toGroupId: props.groupId,
       toTab: props.group.tabs.length
     })
   }
@@ -254,11 +260,12 @@ function onTabBarDrop(event) {
   event.preventDefault()
   const raw = event.dataTransfer.getData('application/x-tab-drag')
   if (!raw) return
-  const { sourceGroup, sourceTab } = JSON.parse(raw)
-  if (sourceGroup !== props.groupIndex) {
+  const { sourceGroupId, sourceTab } = JSON.parse(raw)
+  if (sourceGroupId !== props.groupId) {
     emit('tab-drop-from-group', {
-      fromGroup: sourceGroup,
+      fromGroupId: sourceGroupId,
       fromTab: sourceTab,
+      toGroupId: props.groupId,
       toTab: props.group.tabs.length
     })
   } else {
@@ -323,6 +330,7 @@ function handleMarkdownClick(event) {
 .editor-group {
   display: flex;
   flex-direction: column;
+  flex: 1;
   overflow: hidden;
   min-width: 200px;
   min-height: 100px;

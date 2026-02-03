@@ -5,7 +5,9 @@ const fs = require('fs');
 const path = require('path');
 const { Client } = require('elasticsearch');
 const { execSync } = require('child_process');
-const { ComputeQueue, JobListener } = require('./compute');
+const { ComputeQueue, JobListener, getJobHandler } = require('./compute');
+const { getPythonPath } = require('./compute/utils');
+const { stopAllKernels } = require('./compute/jobs/python-kernel');
 const { createMainLogger } = require('./logger');
 const database = require('./database');
 const terminal = require('./terminal');
@@ -136,7 +138,64 @@ app.post('/compute', async (req, res) => {
 
     logger.job('QUEUED', jobId, { type, params, priority });
 
-    // Add to queue
+    // Check if this is a persistent kernel job (cell execution with shared state)
+    // These must run in the main process so the kernel persists across cell executions
+    // Any cell-based execution uses persistent kernel unless explicitly disabled
+    const isPersistentKernelJob = type === 'execute' && (
+      (params?.cellInfo && params?.usePersistentKernel !== false) ||
+      params?.kernelAction
+    );
+
+    if (isPersistentKernelJob) {
+      // Run directly in main process to preserve kernel state across cells
+      jobListener.registerJob(jobId);
+
+      const environment = params?.environment || 'base';
+      const pythonPath = getPythonPath(environment);
+      const emit = jobListener.createEmitter(jobId);
+
+      const context = {
+        pythonPath,
+        jobId,
+        emit,
+        workerId: 'main',
+        environment
+      };
+
+      const executeHandler = getJobHandler('execute');
+
+      // Fire-and-forget: execute asynchronously, return jobId immediately
+      (async () => {
+        try {
+          const result = await executeHandler(params, context);
+          const exitCode = result?.error ? 3 : 0;
+
+          if (result?.error) {
+            jobListener.error(jobId, result.error, exitCode);
+          } else {
+            jobListener.result(jobId, result, exitCode);
+          }
+          jobListener.complete(jobId, exitCode);
+
+          const status = result?.error ? 'failed' : 'completed';
+          await Job.updateStatus(job.id, status, result);
+          logger.job(status.toUpperCase(), jobId, result?.error ? { error: result.error } : { success: true });
+        } catch (error) {
+          jobListener.error(jobId, error.message, 1);
+          jobListener.complete(jobId, 1);
+          await Job.updateStatus(job.id, 'failed', { error: error.message });
+          logger.job('FAILED', jobId, { error: error.message });
+        }
+      })();
+
+      return res.json({
+        jobId,
+        status: 'queued',
+        position: null
+      });
+    }
+
+    // Non-persistent jobs go through the worker queue as before
     computeQueue.enqueue({ ...job, id: jobId }, async (result) => {
       const status = result.error ? 'failed' : 'completed';
       logger.job(status.toUpperCase(), jobId, result.error ? { error: result.error } : { success: true });
@@ -1248,6 +1307,7 @@ async function start() {
     process.on('SIGTERM', async () => {
       logger.info('SIGTERM received, shutting down gracefully');
       console.log('SIGTERM received, shutting down gracefully');
+      stopAllKernels();
       server.close();
       await database.close();
       await esClient.close();

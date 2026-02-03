@@ -156,6 +156,15 @@ while True:
       }
     });
 
+    // Handle stdin errors (EPIPE if Python process dies unexpectedly)
+    this.process.stdin.on('error', (err) => {
+      if (err.code === 'EPIPE' || err.code === 'ERR_STREAM_DESTROYED') {
+        // Python process died — handled by 'close' event
+        return;
+      }
+      console.error('Kernel stdin error:', err);
+    });
+
     // Set up output handling
     const rl = readline.createInterface({
       input: this.process.stdout,
@@ -211,7 +220,12 @@ while True:
 
     this.process.on('close', (exitCode) => {
       this.isReady = false;
+      this.isExecuting = false;
       this.process = null;
+      if (this.executionTimeout) {
+        clearTimeout(this.executionTimeout);
+        this.executionTimeout = null;
+      }
       if (this.currentReject) {
         this.currentReject(new Error(`Kernel exited with code ${exitCode}`));
         this.currentResolve = null;
@@ -293,15 +307,27 @@ while True:
         }, timeout);
       }
 
-      // Update cell index if provided
-      if (cellIndex !== undefined) {
-        const cellIndexUpdate = `import os; os.environ['CM_CELL_INDEX'] = '${cellIndex}'\n`;
-        this.process.stdin.write(cellIndexUpdate);
+      // Guard against writing to a dead process
+      if (!this.process || !this.process.stdin || this.process.stdin.destroyed) {
+        this.isExecuting = false;
+        reject(new Error('Kernel process is not available'));
+        return;
       }
 
-      // Send code followed by execution marker
-      this.process.stdin.write(code + '\n');
-      this.process.stdin.write('<<<EXECUTE_CELL>>>\n');
+      try {
+        // Update cell index if provided
+        if (cellIndex !== undefined) {
+          const cellIndexUpdate = `import os; os.environ['CM_CELL_INDEX'] = '${cellIndex}'\n`;
+          this.process.stdin.write(cellIndexUpdate);
+        }
+
+        // Send code followed by execution marker
+        this.process.stdin.write(code + '\n');
+        this.process.stdin.write('<<<EXECUTE_CELL>>>\n');
+      } catch (err) {
+        this.isExecuting = false;
+        reject(new Error(`Failed to write to kernel: ${err.message}`));
+      }
     });
   }
 

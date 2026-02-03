@@ -2183,6 +2183,7 @@ function createEditor() {
       override: [languageCompletions],
       activateOnTyping: true,
       maxRenderedOptions: 20,
+      defaultKeymap: false,
     }),
     // Trigger autocomplete on space/dot in import contexts (CM6 skips whitespace by default)
     props.language === 'python' ? EditorView.updateListener.of(update => {

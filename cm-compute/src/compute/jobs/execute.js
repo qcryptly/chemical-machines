@@ -81,8 +81,8 @@ async function execute(params, context) {
     }
   }
 
-  // Use persistent kernel for cell files by default
-  if (usePersistentKernel && cellInfo && cellInfo.isCellFile) {
+  // Use persistent kernel for any cell-based execution by default
+  if (usePersistentKernel && cellInfo) {
     const kernel = getKernel(kernelId, pythonPath, WORKSPACE_DIR, sourceFullDir, cellInfo);
     const cellIndex = cellInfo.cellIndex;
 

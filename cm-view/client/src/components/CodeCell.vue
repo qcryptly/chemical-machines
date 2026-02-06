@@ -70,7 +70,7 @@ import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLi
 import OutputPanel from './OutputPanel.vue'
 import { GripVertical, Plus, Square, Play, X, ChevronDown } from 'lucide-vue-next'
 import { EditorState } from '@codemirror/state'
-import { defaultKeymap, history, historyKeymap, insertNewlineAndIndent, indentMore } from '@codemirror/commands'
+import { defaultKeymap, history, historyKeymap, insertNewlineAndIndent, indentMore, indentLess } from '@codemirror/commands'
 import { syntaxHighlighting, HighlightStyle, bracketMatching, foldGutter } from '@codemirror/language'
 import { autocompletion, completeFromList, acceptCompletion, startCompletion } from '@codemirror/autocomplete'
 import { cpp } from '@codemirror/lang-cpp'
@@ -2233,6 +2233,12 @@ function createEditor() {
           // If no completion to accept, indent instead
           return indentMore(view)
         },
+      },
+      // Shift-Tab dedents (unindents) the selection
+      {
+        key: 'Shift-Tab',
+        run: indentLess,
+        preventDefault: true,
       },
       // Ctrl+Space to manually trigger autocomplete
       {

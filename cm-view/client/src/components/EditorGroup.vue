@@ -3,7 +3,7 @@
     <!-- Tab Bar -->
     <div class="group-tab-bar" v-if="group.tabs.length > 0" @dragover.prevent @drop="onTabBarDrop">
       <div
-        v-for="(tab, index) in group.tabs"
+        v-for="(tab, index) in tabsWithDocs"
         :key="tab.path"
         class="tab"
         :class="{
@@ -97,6 +97,7 @@ import {
   X, Columns2, Rows2, FileCode, Settings,
   Terminal as TerminalIcon, Braces, FileText, File as LucideFile
 } from 'lucide-vue-next'
+import * as documentStore from '../stores/documentStore.js'
 
 const props = defineProps({
   group: { type: Object, required: true },
@@ -113,11 +114,31 @@ const emit = defineEmits([
 
 const markdownPreviewRef = ref(null)
 
-// Active tab
+// Helper to get merged tab with document data
+function getTabWithDocument(tab) {
+  if (!tab) return null
+  const doc = documentStore.getDocument(tab.path)
+  return {
+    ...tab,
+    // Merge document properties (these override tab props if present)
+    cells: doc?.cells || [],
+    isDirty: doc?.isDirty || false,
+    language: doc?.language || 'python',
+    useCells: doc?.useCells !== false,
+    isMarkdown: doc?.isMarkdown || false
+  }
+}
+
+// Get all tabs with document data merged (for tab bar display)
+const tabsWithDocs = computed(() => {
+  return props.group.tabs.map(tab => getTabWithDocument(tab))
+})
+
+// Active tab with document data merged
 const activeTab = computed(() => {
   const g = props.group
   if (g.activeTabIndex >= 0 && g.activeTabIndex < g.tabs.length) {
-    return g.tabs[g.activeTabIndex]
+    return getTabWithDocument(g.tabs[g.activeTabIndex])
   }
   return null
 })

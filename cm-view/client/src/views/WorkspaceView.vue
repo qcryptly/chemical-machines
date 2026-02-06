@@ -443,6 +443,7 @@ import {
 } from 'lucide-vue-next'
 
 import { marked } from 'marked'
+import * as documentStore from '../stores/documentStore.js'
 
 // Helper to generate slug from text (for anchor IDs)
 function slugify(text) {
@@ -596,28 +597,56 @@ const activeTabIndex = computed({
 const currentFile = computed(() => {
   const tab = _focusedTab()
   if (!tab) return null
-  return { path: tab.path, name: tab.name, language: tab.language }
+  const doc = documentStore.getDocument(tab.path)
+  return { path: tab.path, name: tab.name, language: doc?.language || 'python' }
 })
 
 const cells = computed({
-  get: () => _focusedTab()?.cells || [],
+  get: () => {
+    const tab = _focusedTab()
+    if (!tab) return []
+    const doc = documentStore.getDocument(tab.path)
+    return doc?.cells || []
+  },
   set: (value) => {
     const tab = _focusedTab()
-    if (tab) tab.cells = value
+    if (!tab) return
+    const doc = documentStore.getDocument(tab.path)
+    if (doc) doc.cells = value
   }
 })
 
 const hasUnsavedChanges = computed({
-  get: () => _focusedTab()?.isDirty || false,
+  get: () => {
+    const tab = _focusedTab()
+    if (!tab) return false
+    const doc = documentStore.getDocument(tab.path)
+    return doc?.isDirty || false
+  },
   set: (value) => {
     const tab = _focusedTab()
-    if (tab) tab.isDirty = value
+    if (!tab) return
+    if (value) {
+      documentStore.markDirty(tab.path)
+    } else {
+      documentStore.markClean(tab.path)
+    }
   }
 })
 
-const currentUseCells = computed(() => _focusedTab()?.useCells !== false)
+const currentUseCells = computed(() => {
+  const tab = _focusedTab()
+  if (!tab) return true
+  const doc = documentStore.getDocument(tab.path)
+  return doc?.useCells !== false
+})
 
-const isMarkdownFile = computed(() => _focusedTab()?.isMarkdown === true)
+const isMarkdownFile = computed(() => {
+  const tab = _focusedTab()
+  if (!tab) return false
+  const doc = documentStore.getDocument(tab.path)
+  return doc?.isMarkdown === true
+})
 
 const markdownPreviewMode = computed({
   get: () => _focusedTab()?.previewMode === true,
@@ -1146,16 +1175,18 @@ function cellsToFileContent(cellsArray, language, useCells = true) {
  * Save current file
  */
 async function saveFile() {
-  if (!currentFile.value) return
+  const tab = _focusedTab()
+  if (!tab) return
 
   try {
-    const activeTab = openTabs.value[activeTabIndex.value]
-    const useCells = activeTab?.useCells !== false
-    const content = cellsToFileContent(cells.value, currentFile.value.language, useCells)
-    await axios.put(fileApiUrl(currentFile.value.path), {
+    const doc = documentStore.getDocument(tab.path)
+    if (!doc) return
+
+    const content = cellsToFileContent(doc.cells, doc.language, doc.useCells)
+    await axios.put(fileApiUrl(tab.path), {
       content
     })
-    hasUnsavedChanges.value = false
+    documentStore.markClean(tab.path)
   } catch (error) {
     console.error('Error saving file:', error)
     alert(`Failed to save: ${error.response?.data?.error || error.message}`)
@@ -1189,11 +1220,18 @@ function closeTabInLeaf(leafId, index) {
   if (!leaf || index < 0 || index >= leaf.tabs.length) return
 
   const tab = leaf.tabs[index]
-  if (tab.isDirty) {
+  const doc = documentStore.getDocument(tab.path)
+
+  // Check for unsaved changes from document store
+  if (doc?.isDirty) {
     if (!confirm(`"${tab.name}" has unsaved changes. Close anyway?`)) return
   }
 
+  // Remove tab from leaf
   leaf.tabs.splice(index, 1)
+
+  // Decrement document refcount (removes from store when last tab closes)
+  documentStore.closeDocument(tab.path)
 
   if (leaf.tabs.length === 0) {
     leaf.activeTabIndex = -1
@@ -1329,75 +1367,56 @@ function handleLeafCellInterrupt({ leafId, cellIndex }) {
 }
 
 function addCell() {
-  // Inherit language from current file or last cell
-  const language = currentFile.value?.language || cells.value[cells.value.length - 1]?.language || 'python'
-  const environment = cells.value[cells.value.length - 1]?.environment || selectedEnvironment.value
+  const tab = _focusedTab()
+  if (!tab) return
 
-  cells.value.push({
-    id: Date.now(),
-    type: 'code',
+  // Inherit language from current file or last cell
+  const doc = documentStore.getDocument(tab.path)
+  const docCells = doc?.cells || []
+  const language = doc?.language || docCells[docCells.length - 1]?.language || 'python'
+  const environment = docCells[docCells.length - 1]?.environment || selectedEnvironment.value
+
+  documentStore.addCell(tab.path, -1, {
     language,
-    environment,
-    content: '',
-    title: '',
-    output: null,
-    status: null
+    environment
   })
-  hasUnsavedChanges.value = true
 }
 
-function updateCell(index, { content, language, environment, cppEnvironment, vendorEnvironment, compiler, cppStandard }) {
-  const cell = cells.value[index]
-  if (content !== undefined && content !== cell.content) {
-    cell.content = content
-    hasUnsavedChanges.value = true
-  }
-  if (language !== undefined) cell.language = language
-  if (environment !== undefined) cell.environment = environment
-  if (cppEnvironment !== undefined) cell.cppEnvironment = cppEnvironment
-  if (vendorEnvironment !== undefined) cell.vendorEnvironment = vendorEnvironment
-  if (compiler !== undefined) cell.compiler = compiler
-  if (cppStandard !== undefined) cell.cppStandard = cppStandard
+function updateCell(index, data) {
+  const tab = _focusedTab()
+  if (!tab) return
+
+  documentStore.updateCell(tab.path, index, data)
 }
 
 function deleteCell(index) {
-  cells.value.splice(index, 1)
-  if (cells.value.length === 0 && currentFile.value) {
-    addCell()
-  }
-  hasUnsavedChanges.value = true
+  const tab = _focusedTab()
+  if (!tab) return
+
+  documentStore.deleteCell(tab.path, index)
 }
 
 function createCellBelow(index) {
+  const tab = _focusedTab()
+  if (!tab) return
+
   // Inherit language and environment from the cell above
-  const cellAbove = cells.value[index]
-  const language = cellAbove?.language || currentFile.value?.language || 'python'
+  const doc = documentStore.getDocument(tab.path)
+  const cellAbove = doc?.cells[index]
+  const language = cellAbove?.language || doc?.language || 'python'
   const environment = cellAbove?.environment || selectedEnvironment.value
 
-  const newCell = {
-    id: Date.now(),
-    type: 'code',
+  documentStore.addCell(tab.path, index, {
     language,
-    environment,
-    content: '',
-    title: '',
-    output: null,
-    status: null
-  }
-
-  // Insert the new cell right after the current one
-  cells.value.splice(index + 1, 0, newCell)
-  hasUnsavedChanges.value = true
+    environment
+  })
 }
 
 function reorderCells({ fromIndex, toIndex }) {
-  if (fromIndex === toIndex) return
+  const tab = _focusedTab()
+  if (!tab) return
 
-  // Remove the cell from its current position
-  const [movedCell] = cells.value.splice(fromIndex, 1)
-
-  // Insert it at the new position
-  cells.value.splice(toIndex, 0, movedCell)
+  documentStore.reorderCells(tab.path, fromIndex, toIndex)
 
   hasUnsavedChanges.value = true
 }
@@ -1716,22 +1735,29 @@ async function openFile(file) {
     // Switch to editor mode when opening a file
     bottomPanelMode.value = 'editor'
 
-    // Check if file is already open in any leaf
-    const allLeaves = getAllLeaves()
-    for (const leaf of allLeaves) {
-      const existingIndex = leaf.tabs.findIndex(tab => tab.path === file.path)
+    // Check if file is already open in the CURRENT focused leaf only
+    // (Allow opening same file in different panes for side-by-side editing)
+    const currentLeaf = focusedLeaf.value
+    if (currentLeaf) {
+      const existingIndex = currentLeaf.tabs.findIndex(tab => tab.path === file.path)
       if (existingIndex >= 0) {
-        leaf.activeTabIndex = existingIndex
-        focusedLeafId.value = leaf.id
+        currentLeaf.activeTabIndex = existingIndex
         return
       }
     }
 
-    const response = await axios.get(fileApiUrl(file.path))
-    if (response.data.type === 'file') {
+    // Check if document is already in the store (was opened before but tab closed)
+    let doc = documentStore.getDocument(file.path)
+
+    if (!doc) {
+      // Fetch file content and create document in store
+      const response = await axios.get(fileApiUrl(file.path))
+      if (response.data.type !== 'file') return
+
       const language = getLanguageFromExt(file.name)
       const content = response.data.content || ''
       const useCells = shouldUseCells(file.name, content)
+      const isMarkdown = file.name.toLowerCase().endsWith('.md')
 
       let fileCells
       if (useCells) {
@@ -1751,29 +1777,35 @@ async function openFile(file) {
         }]
       }
 
-      // Fetch HTML outputs from .out/ directory
-      const fileHtmlOutputs = await fetchHtmlOutputs(file.path)
-
-      // Check if this is a markdown file
-      const isMarkdown = file.name.toLowerCase().endsWith('.md')
-
-      // Add new tab to focused leaf
-      const group = focusedLeaf.value
-      group.tabs.push({
-        path: file.path,
-        name: file.name,
+      // Create document in central store
+      doc = documentStore.openDocument(file.path, fileCells, {
         language,
-        cells: fileCells,
-        isDirty: false,
         useCells,
-        htmlOutputs: fileHtmlOutputs,
-        isMarkdown,
-        previewMode: isMarkdown
+        isMarkdown
       })
-
-      // Switch to the new tab
-      group.activeTabIndex = group.tabs.length - 1
+    } else {
+      // Document exists - increment refcount
+      documentStore.openDocument(file.path, doc.cells, {
+        language: doc.language,
+        useCells: doc.useCells,
+        isMarkdown: doc.isMarkdown
+      })
     }
+
+    // Fetch HTML outputs from .out/ directory
+    const fileHtmlOutputs = await fetchHtmlOutputs(file.path)
+
+    // Add new tab to focused leaf (tab only stores UI state, not content)
+    const group = focusedLeaf.value
+    group.tabs.push({
+      path: file.path,
+      name: file.name,
+      htmlOutputs: fileHtmlOutputs,
+      previewMode: doc.isMarkdown
+    })
+
+    // Switch to the new tab
+    group.activeTabIndex = group.tabs.length - 1
   } catch (error) {
     console.error('Error opening file:', error)
     alert(`Failed to open file: ${error.response?.data?.error || error.message}`)

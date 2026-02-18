@@ -203,8 +203,18 @@ const pythonCompletions = [
   { label: 'get', type: 'function', detail: 'cm.data: get' },
   { label: 'compare', type: 'function', detail: 'cm.data: compare' },
   { label: 'sync', type: 'function', detail: 'cm.data: sync' },
+  { label: 'sync_status', type: 'function', detail: 'cm.data: sync_status' },
+  { label: 'wait_for_sync', type: 'function', detail: 'cm.data: wait_for_sync' },
   { label: 'stats', type: 'function', detail: 'cm.data: stats' },
   { label: 'status', type: 'function', detail: 'cm.data: status' },
+  { label: 'cm.math', type: 'module', detail: 'Chemical Machines Math Package' },
+  { label: 'from cm.math import', type: 'text', detail: 'import CM math' },
+  // CM math - classes
+  { label: 'IndexedExpression', type: 'class', detail: 'cm.math: IndexedExpression' },
+  // CM math - functions
+  { label: 'struct', type: 'function', detail: 'cm.math: struct' },
+  { label: 'numbers', type: 'function', detail: 'cm.math: numbers' },
+  { label: 'index', type: 'function', detail: 'cm.math: index' },
   { label: 'cm.qm', type: 'module', detail: 'Chemical Machines Quantum Mechanics Package' },
   { label: 'from cm.qm import', type: 'text', detail: 'import CM qm' },
   // CM qm - constants

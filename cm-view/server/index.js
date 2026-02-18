@@ -792,7 +792,7 @@ app.get('/api/workspaces/:workspaceId/output/:path(*)', async (req, res) => {
       // Split HTML by cell delimiter comments
       // Expected format: <!-- CELL_DELIMITER --> or similar marker
       const cellDelimiter = /<!--\s*CELL[_-]?DELIMITER\s*-->/gi;
-      const cellOutputs = htmlContent.split(cellDelimiter).map(s => s.trim()).filter(s => s.length > 0);
+      const cellOutputs = htmlContent.split(cellDelimiter).map(s => s.trim());
 
       res.json({
         exists: true,

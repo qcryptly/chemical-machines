@@ -143,13 +143,20 @@ async function execute(params, context) {
     cellEnv.CM_WORKSPACE_DIR = sourceFullDir;
   }
 
+  // Clear stale HTML output before execution so removed cm.views calls don't linger
+  const clearPrefix = cellInfo
+    ? `try:\n from cm.views.output import clear as _cm_clear; _cm_clear()\nexcept Exception:\n pass\n`
+    : '';
+  const fullCode = clearPrefix + code;
+
   return new Promise((resolve, reject) => {
-    const python = spawn(pythonPath, ['-c', code], {
+    const python = spawn(pythonPath, ['-c', fullCode], {
       cwd: sourceFullDir,  // Run from the source file's directory
       env: {
         ...process.env,
         ...cellEnv,
         PYTHONUNBUFFERED: '1',
+        PYTHONDONTWRITEBYTECODE: '1',
         PYTHONPATH: newPythonPath
       }
     });

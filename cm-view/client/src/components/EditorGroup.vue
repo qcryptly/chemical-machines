@@ -122,6 +122,7 @@ function getTabWithDocument(tab) {
     ...tab,
     // Merge document properties (these override tab props if present)
     cells: doc?.cells || [],
+    htmlOutputs: doc?.htmlOutputs || [],
     isDirty: doc?.isDirty || false,
     language: doc?.language || 'python',
     useCells: doc?.useCells !== false,

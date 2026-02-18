@@ -72,6 +72,7 @@ class PythonKernel {
 import sys
 import traceback
 import signal
+import importlib
 
 # Print delimiter after each cell execution
 DELIMITER = "${OUTPUT_DELIMITER}"
@@ -86,10 +87,20 @@ def handle_interrupt(signum, frame):
     interrupted = True
     raise KeyboardInterrupt("Cell execution interrupted by user")
 
+def _reload_cm_modules():
+    """Clear cached cm.* modules so source changes are picked up on next import."""
+    stale = [name for name in sys.modules if name == 'cm' or name.startswith('cm.')]
+    for name in stale:
+        del sys.modules[name]
+    importlib.invalidate_caches()
+
 def execute_cell(code):
     """Execute a cell of code and capture output"""
     global interrupted
     interrupted = False
+
+    # Auto-reload cm library modules to pick up source changes
+    _reload_cm_modules()
 
     # Set up interrupt handler for this cell execution
     old_handler = signal.signal(signal.SIGINT, handle_interrupt)
@@ -152,6 +163,7 @@ while True:
         ...process.env,
         ...cellEnv,
         PYTHONUNBUFFERED: '1',
+        PYTHONDONTWRITEBYTECODE: '1',
         PYTHONPATH: newPythonPath
       }
     });
@@ -315,10 +327,13 @@ while True:
       }
 
       try {
-        // Update cell index if provided
+        // Update cell index and clear previous HTML output for this cell
         if (cellIndex !== undefined) {
           const cellIndexUpdate = `import os; os.environ['CM_CELL_INDEX'] = '${cellIndex}'\n`;
           this.process.stdin.write(cellIndexUpdate);
+          // Clear stale HTML output so removed cm.views calls don't linger
+          const clearOutput = `try:\n from cm.views.output import clear as _cm_clear; _cm_clear()\nexcept Exception:\n pass\n`;
+          this.process.stdin.write(clearOutput);
         }
 
         // Send code followed by execution marker

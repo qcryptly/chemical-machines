@@ -32,6 +32,7 @@ export function openDocument(path, cells, options = {}) {
   const document = reactive({
     path,
     cells,
+    htmlOutputs: options.htmlOutputs || [],
     language: options.language || 'python',
     useCells: options.useCells !== false,
     isMarkdown: options.isMarkdown || false,
@@ -116,6 +117,10 @@ export function addCell(path, afterIndex = -1, cellData = {}) {
 
   const insertAt = afterIndex >= 0 ? afterIndex + 1 : doc.cells.length
   doc.cells.splice(insertAt, 0, newCell)
+  // Keep htmlOutputs aligned with cells
+  if (doc.htmlOutputs) {
+    doc.htmlOutputs.splice(insertAt, 0, '')
+  }
   doc.isDirty = true
 
   return newCell
@@ -131,6 +136,10 @@ export function deleteCell(path, cellIndex) {
   if (!doc || !doc.cells[cellIndex]) return
 
   doc.cells.splice(cellIndex, 1)
+  // Keep htmlOutputs aligned with cells
+  if (doc.htmlOutputs) {
+    doc.htmlOutputs.splice(cellIndex, 1)
+  }
   doc.isDirty = true
 
   // Ensure at least one cell remains
@@ -151,7 +160,24 @@ export function reorderCells(path, fromIndex, toIndex) {
 
   const [movedCell] = doc.cells.splice(fromIndex, 1)
   doc.cells.splice(toIndex, 0, movedCell)
+  // Keep htmlOutputs aligned with cells
+  if (doc.htmlOutputs && doc.htmlOutputs.length > fromIndex) {
+    const [movedOutput] = doc.htmlOutputs.splice(fromIndex, 1)
+    doc.htmlOutputs.splice(toIndex, 0, movedOutput)
+  }
   doc.isDirty = true
+}
+
+/**
+ * Set HTML outputs for a document (from .out/ file refresh)
+ * @param {string} path
+ * @param {Array} outputs - Array of HTML strings, one per cell
+ */
+export function setHtmlOutputs(path, outputs) {
+  const doc = documents.get(path)
+  if (doc) {
+    doc.htmlOutputs = outputs || []
+  }
 }
 
 /**

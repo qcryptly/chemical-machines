@@ -29,6 +29,19 @@ Complete reference documentation for the `cm` library - a Python library for cre
   - [Differential Operators](#differential-operators)
   - [Hydrogen Wavefunctions](#hydrogen-wavefunctions)
   - [Basis Functions](#basis-functions)
+- [cm.math Module](#cmmath-module)
+  - [Overview](#overview)
+  - [Numbers](#numbers)
+  - [Linear Algebra (struct.lin_alg)](#linear-algebra-structlin_alg)
+  - [Expression Operations](#expression-operations)
+  - [LaTeX Rendering](#cmmath-latex-rendering)
+  - [Eager Evaluation (NumPy)](#eager-evaluation-numpy)
+  - [PyTorch Compute Graphs](#pytorch-compute-graphs)
+  - [Custom Structures](#custom-structures)
+  - [Symbolic Indexing](#symbolic-indexing)
+  - [Special Functions (struct.spec_func)](#special-functions-structspec_func)
+  - [Constraints](#constraints)
+  - [Variable Binding and Substitution](#variable-binding-and-substitution)
 - [cm.qm Module](#cmqm-module)
   - [Atoms](#atoms)
   - [Electron Configurations](#electron-configurations)
@@ -64,6 +77,13 @@ Complete reference documentation for the `cm` library - a Python library for cre
     - [Polarizability](#polarizability)
     - [Effective Core Potentials](#effective-core-potentials-ecps)
     - [Molecular Orbital Visualization](#molecular-orbital-visualization)
+- [cm.data Module](#cmdata-module)
+  - [Searching for Molecules](#searching-for-molecules)
+  - [Getting Molecule Data](#getting-molecule-data)
+  - [Comparing Computed vs. Benchmark Data](#comparing-computed-vs-benchmark-data)
+  - [Syncing Benchmark Databases](#syncing-benchmark-databases)
+  - [Checking Status](#checking-status)
+  - [Complete Workflow Example](#complete-workflow-example)
 - [C++ Support](#c-support)
 - [Colormaps Reference](#colormaps-reference)
 - [Element Data Reference](#element-data-reference)
@@ -1894,6 +1914,512 @@ value = contracted.evaluate(x=0.0, y=0.0, z=0.0)
 
 ---
 
+## cm.math Module
+
+The `cm.math` module is a structure-based symbolic mathematics library. Every mathematical object belongs to a **Structure** — a set equipped with operations and axioms. Expressions form a DAG (directed acyclic graph) that can be rendered to LaTeX, evaluated eagerly with NumPy, or compiled to PyTorch compute graphs.
+
+```python
+from cm.math import struct, numbers
+```
+
+### Overview
+
+The module is organized around two key imports:
+
+- **`struct`** — The structure namespace containing mathematical structures (e.g., `struct.lin_alg` for linear algebra)
+- **`numbers`** — Scalar fields and numeric dtypes
+
+```python
+from cm.math import struct, numbers
+import numpy as np
+
+# Create tensor expressions
+A = struct.lin_alg.tensor(shape=(3,3), dtype=numbers.float64, value=np.eye(3), name="A")
+B = struct.lin_alg.tensor(shape=(3,3), name="B")
+
+# Build symbolic expressions with operator overloading
+expr = (A @ B).det() + A.trace()
+
+# Four interfaces:
+expr.to_latex()                          # LaTeX string
+expr.evaluate(B=np.ones((3,3)))          # NumPy eager evaluation
+expr.to_torch(device="cpu")              # PyTorch compute graph
+expr.render()                            # HTML output via cm.views
+```
+
+### Numbers
+
+The `numbers` module defines abstract fields and concrete compute dtypes.
+
+#### Abstract Fields
+
+| Field | LaTeX | Description |
+|-------|-------|-------------|
+| `numbers.Reals` | `\mathbb{R}` | Real numbers |
+| `numbers.Complex` | `\mathbb{C}` | Complex numbers |
+| `numbers.Rationals` | `\mathbb{Q}` | Rational numbers |
+| `numbers.Integers` | `\mathbb{Z}` | Integers (ring) |
+
+#### Concrete Dtypes
+
+| Dtype | NumPy | PyTorch | Field |
+|-------|-------|---------|-------|
+| `numbers.float32` | `np.float32` | `torch.float32` | Reals |
+| `numbers.float64` | `np.float64` | `torch.float64` | Reals |
+| `numbers.complexF32` | `np.complex64` | `torch.complex64` | Complex |
+| `numbers.complexF64` | `np.complex128` | `torch.complex128` | Complex |
+| `numbers.int32` | `np.int32` | `torch.int32` | Integers |
+| `numbers.int64` | `np.int64` | `torch.int64` | Integers |
+
+```python
+# Dtypes carry their field association
+numbers.float64.field    # => Field('Reals')
+numbers.float64.np_dtype # => numpy.float64
+```
+
+### Linear Algebra (struct.lin_alg)
+
+The linear algebra structure provides factory functions for creating tensor, vector, matrix, and scalar expressions.
+
+#### `struct.lin_alg.tensor(shape=None, dtype=None, name=None, value=None)`
+
+Create a tensor expression. If `value` is provided, the tensor is concrete (eager). Otherwise it is abstract (lazy) and must be bound at evaluation time.
+
+```python
+# Concrete tensor (has a value)
+A = struct.lin_alg.tensor(shape=(3,3), dtype=numbers.float64, value=np.eye(3), name="A")
+
+# Abstract tensor (no value — a symbolic placeholder)
+B = struct.lin_alg.tensor(shape=(3,3), name="B")
+
+# Fully lazy tensor (no shape, no value)
+X = struct.lin_alg.tensor()
+```
+
+#### `struct.lin_alg.vector(dim=None, dtype=None, name=None, value=None)`
+
+Create a rank-1 tensor (vector).
+
+```python
+v = struct.lin_alg.vector(dim=3, name="v")
+w = struct.lin_alg.vector(dim=3, name="w", value=np.array([1, 0, 0]))
+```
+
+#### `struct.lin_alg.matrix(rows=None, cols=None, dtype=None, name=None, value=None)`
+
+Create a rank-2 tensor (matrix).
+
+```python
+M = struct.lin_alg.matrix(rows=3, cols=3, name="M")
+```
+
+#### `struct.lin_alg.scalar(value=None, dtype=None, name=None)`
+
+Create a scalar expression.
+
+```python
+c = struct.lin_alg.scalar(name="c")         # abstract scalar variable
+k = struct.lin_alg.scalar(value=2.5)        # concrete scalar constant
+```
+
+### Expression Operations
+
+Expressions support operator overloading and method-based operations. All operations return new `Expression` nodes in the DAG.
+
+#### Arithmetic Operators
+
+| Operator | Description | LaTeX |
+|----------|-------------|-------|
+| `A + B` | Addition | `\mathbf{A} + \mathbf{B}` |
+| `A - B` | Subtraction | `\mathbf{A} - \mathbf{B}` |
+| `A * B` | Element-wise / scalar multiply | `\mathbf{A} \cdot \mathbf{B}` |
+| `A @ B` | Matrix multiply | `\mathbf{A} \mathbf{B}` |
+| `A / B` | Division (renders as fraction) | `\frac{\mathbf{A}}{\mathbf{B}}` |
+| `A ** n` | Exponentiation | `\mathbf{A}^{n}` |
+| `-A` | Negation | `-\mathbf{A}` |
+
+Scalar-tensor multiplication omits the dot: `2 * A` renders as `2 \mathbf{A}`.
+
+#### Linear Algebra Methods
+
+| Method | Description | LaTeX |
+|--------|-------------|-------|
+| `A.det()` | Determinant | `\det\left(\mathbf{A}\right)` |
+| `A.trace()` | Trace | `\mathrm{tr}\left(\mathbf{A}\right)` |
+| `A.transpose()` | Transpose | `\mathbf{A}^{\top}` |
+| `A.inverse()` | Matrix inverse | `\mathbf{A}^{-1}` |
+| `A.eigenvalues()` | Eigenvalues | `\mathrm{eig}\left(\mathbf{A}\right)` |
+| `A.norm()` | Norm | `\left\|\mathbf{A}\right\|` |
+
+```python
+A = struct.lin_alg.tensor(shape=(3,3), name="A")
+B = struct.lin_alg.tensor(shape=(3,3), name="B")
+
+# Compose operations into complex expressions
+expr = (A @ B).det() + 3 * A.trace() - B.det()
+expr.to_latex()
+# => \det\left(\mathbf{A} \mathbf{B}\right) + 3 \mathrm{tr}\left(\mathbf{A}\right) - \det\left(\mathbf{B}\right)
+```
+
+### cm.math LaTeX Rendering
+
+Expressions render to LaTeX with automatic formatting for Greek letters, subscripts, bold tensors, and proper operator precedence.
+
+#### `expr.to_latex() -> str`
+
+Returns the LaTeX string representation of the expression.
+
+#### `expr.render(display=True, justify="center")`
+
+Renders the expression as MathJax HTML output via `cm.views.html()`. Uses the same rendering pipeline as `cm.symbols`.
+
+```python
+expr = (A @ B).det() + A.trace()
+expr.render()                          # display math, centered
+expr.render(display=False)             # inline math
+expr.render(justify="left")            # left-aligned
+```
+
+#### Variable Naming
+
+- **Tensor variables** render in bold: `name="A"` → `\mathbf{A}`
+- **Scalar variables** render plain: `name="x"` → `x`
+- **Greek letters** auto-convert: `name="alpha"` → `\alpha`, `name="Psi"` → `\Psi`
+- **Subscripts**: `name="x_0"` → `x_0`, `name="x_10"` → `x_{10}`
+- **Greek + subscript**: `name="sigma_1"` → `\sigma_1`
+- **Greek tensors** use boldsymbol: `name="alpha"` (tensor) → `\boldsymbol{\alpha}`
+
+```python
+# Greek letter names are recognized automatically
+alpha = struct.lin_alg.tensor(shape=(2,2), name="alpha")
+alpha.to_latex()  # => \boldsymbol{\alpha}
+
+psi = struct.lin_alg.scalar(name="psi")
+psi.to_latex()    # => \psi
+
+sigma_1 = struct.lin_alg.tensor(shape=(2,2), name="sigma_1")
+sigma_1.to_latex()  # => \sigma_1
+```
+
+### Eager Evaluation (NumPy)
+
+#### `expr.evaluate(**kwargs) -> numpy scalar or array`
+
+Evaluates the expression DAG using NumPy. Concrete variables (those created with `value=`) are used directly. Abstract variables must be provided as keyword arguments.
+
+```python
+import numpy as np
+
+A = struct.lin_alg.tensor(shape=(3,3), dtype=numbers.float64, value=np.eye(3), name="A")
+B = struct.lin_alg.tensor(shape=(3,3), name="B")
+
+expr = (A @ B).det() + A.trace()
+
+# B is abstract, so we provide it at evaluation time
+result = expr.evaluate(B=np.ones((3,3)))
+# => 3.0  (det(I @ ones) = 0, trace(I) = 3)
+
+# Fully concrete expressions need no arguments
+A.det().evaluate()
+# => 1.0
+```
+
+### PyTorch Compute Graphs
+
+#### `expr.to_torch(device="cpu") -> TorchGraph`
+
+Compiles the expression DAG into a callable `TorchGraph`. The graph accepts keyword tensor arguments and returns a tensor result. Supports autograd differentiation.
+
+```python
+import torch
+
+A = struct.lin_alg.tensor(shape=(3,3), dtype=numbers.float64, value=np.eye(3), name="A")
+B = struct.lin_alg.tensor(shape=(3,3), name="B")
+expr = (A @ B).det() + A.trace()
+
+# Compile to torch
+graph = expr.to_torch(device="cpu")
+print(graph.input_vars)  # => ['B']
+
+# Evaluate with tensor inputs
+result = graph(B=torch.ones(3, 3, dtype=torch.float64))
+# => tensor(3., dtype=torch.float64)
+
+# GPU acceleration (if available)
+graph_gpu = expr.to_torch(device="cuda")
+result_gpu = graph_gpu(B=torch.ones(3, 3, dtype=torch.float64, device="cuda"))
+```
+
+### Custom Structures
+
+Define custom mathematical structures using `struct.define()`.
+
+#### `struct.define(name, carriers=None, ops=None, axioms=None) -> Structure`
+
+```python
+from cm.math.struct.axioms import associativity, closure, identity
+
+# Define a monoid
+Monoid = struct.define(
+    name="Monoid",
+    carriers={"M"},
+    ops={
+        "*": {"arity": 2},
+        "e": {"arity": 0},
+    },
+    axioms=[
+        closure("*", "M"),
+        associativity("*"),
+        identity("*", "e"),
+    ]
+)
+```
+
+### Available Axiom Constructors
+
+| Constructor | Description |
+|-------------|-------------|
+| `closure(op, carrier)` | Result of op stays in carrier set |
+| `associativity(op)` | op(op(a,b),c) == op(a,op(b,c)) |
+| `commutativity(op)` | op(a,b) == op(b,a) |
+| `identity(op, elem)` | op(a,e) == a |
+| `inverse(op, inv_op, id)` | op(a, inv(a)) == identity |
+| `distributivity(op1, op2)` | op1 distributes over op2 |
+| `linearity(op)` | op(ax + by) == a*op(x) + b*op(y) |
+| `bilinearity(op)` | Linear in both arguments |
+| `jacobi_identity(bracket)` | Jacobi identity for Lie brackets |
+| `anticommutativity(op)` | op(a,b) == -op(b,a) |
+
+### Symbolic Indexing
+
+The `cm.math.index` module provides symbolic index variables for tensor element access. Indices compose with all backends (LaTeX, NumPy, PyTorch).
+
+#### `index(name=None)`
+
+Create a symbolic index variable. Auto-named if no name is provided.
+
+```python
+from cm.math import index
+
+i = index("i")   # named index
+j = index("j")
+k = index()      # auto-named index
+```
+
+#### `index.range(start, stop, step=1)`
+
+Create an `IndexRange` for iteration (same API as `np.arange`).
+
+```python
+r = index.range(0, 3)      # 0, 1, 2
+r = index.range(0, 10, 2)  # 0, 2, 4, 6, 8
+len(r)                      # 5
+list(r)                     # [0, 2, 4, 6, 8]
+```
+
+#### Tensor Indexing
+
+Use `[]` on any tensor expression to create an `IndexedExpression`. Chained indexing is flattened: `A[i][j]` is equivalent to `A[i, j]`.
+
+```python
+from cm.math import struct, index
+
+A = struct.lin_alg.matrix(rows=3, cols=3, name="A")
+i = index("i")
+j = index("j")
+
+# Symbolic indexing
+expr = A[i, j]           # IndexedExpression
+expr.base                # Var("A")
+expr.indices             # (index('i'), index('j'))
+expr.free_indices        # (index('i'), index('j'))
+
+# Mixed indexing
+expr2 = A[0, j]
+expr2.concrete_indices   # (ScalarExpr(0),)
+expr2.free_indices       # (index('j'),)
+
+# LaTeX rendering
+expr.to_latex()          # => A_{i, j}
+```
+
+#### `IndexedExpression.substitute_indices(**kwargs)`
+
+Replace symbolic indices with concrete values, returning a new `IndexedExpression`.
+
+```python
+A[i, j].substitute_indices(i=0)      # => A[0, j]
+A[i, j].substitute_indices(i=0, j=1) # => A[0, 1]
+```
+
+#### Evaluating Indexed Expressions
+
+Use `bind_indices()` to bind indices to values or ranges, then `evaluate()` to compute results.
+
+```python
+import numpy as np
+from cm.math import struct, index
+
+A = struct.lin_alg.tensor(
+    shape=(3, 3), name="A",
+    value=np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+)
+i = index("i")
+j = index("j")
+
+# Single element
+result = A[i, j].bind_indices(i=0, j=1).evaluate()
+# => 2
+
+# Iterate over a range
+results = A[i, 0].bind_indices(i=index.range(0, 3)).evaluate()
+# => [IndexResult(i=0) -> 1, IndexResult(i=1) -> 4, IndexResult(i=2) -> 7]
+
+# Cartesian product of ranges
+results = A[i, j].bind_indices(
+    i=index.range(0, 2),
+    j=index.range(0, 2)
+).evaluate()
+# => [IndexResult(i=0, j=0) -> 1, IndexResult(i=0, j=1) -> 2,
+#     IndexResult(i=1, j=0) -> 4, IndexResult(i=1, j=1) -> 5]
+```
+
+### Special Functions (struct.spec_func)
+
+#### `struct.spec_func.krok_delta(a, b)`
+
+Kronecker delta function: returns 1 if `a == b`, else 0. Works with all three backends.
+
+```python
+from cm.math import struct, index
+
+i = index("i")
+j = index("j")
+
+# Symbolic expression
+delta = struct.spec_func.krok_delta(i, j)
+delta.to_latex()  # => \delta_{i j}
+
+# Evaluate over index ranges
+expr = struct.spec_func.krok_delta(i, j)
+results = expr.bind_indices(
+    i=index.range(0, 3),
+    j=index.range(0, 3)
+).evaluate()
+# => 1.0 when i==j, 0.0 otherwise
+```
+
+The Kronecker delta can also be used with indexed tensor expressions:
+
+```python
+A = struct.lin_alg.matrix(rows=3, cols=3, name="A")
+expr = struct.spec_func.krok_delta(A[i, 0], A[j, 0])
+```
+
+### Constraints
+
+Constraints accumulate lazily as operations are applied to abstract expressions. They are checked when `Var.realize()` is called to concretize a variable.
+
+#### `Var.realize(shape=None, dtype=None, value=None)`
+
+Concretize an abstract variable with shape, dtype, or value. Resolves all accumulated constraints and raises `ConstraintError` if any are violated.
+
+```python
+from cm.math import struct
+import numpy as np
+
+X = struct.lin_alg.tensor(name="X")
+
+# Later, concretize with actual data
+X.realize(shape=(3, 3), value=np.eye(3))
+X.evaluate()  # => np.eye(3)
+```
+
+#### Constraint Functions
+
+| Function | Description |
+|----------|-------------|
+| `require_rank(rank)` | Shape must have the specified rank |
+| `require_square()` | Matrix must be square (rank 2, equal dims) |
+| `require_nonsingular()` | Matrix must be nonsingular |
+
+```python
+from cm.math.struct.constraints import require_rank, require_square, ConstraintError
+
+X = struct.lin_alg.tensor(name="X")
+X.constraints.add(require_rank(2))
+X.constraints.add(require_square())
+
+X.realize(shape=(3, 3))  # OK
+# X.realize(shape=(3, 4))  # raises ConstraintError: "must be square matrix"
+```
+
+### Variable Binding and Substitution
+
+Expressions support three methods for providing variable values, each with different semantics.
+
+#### `expr.bind(**kwargs)`
+
+Store values for later use by `evaluate()` and `to_torch()`. Can be called incrementally. Returns `self` for chaining.
+
+```python
+import numpy as np
+from cm.math import struct
+
+A = struct.lin_alg.tensor(shape=(2, 2), name="A")
+B = struct.lin_alg.tensor(shape=(2, 2), name="B")
+
+expr = (A @ B).det()
+expr.bind(A=np.eye(2))
+expr.bind(B=np.ones((2, 2)))
+expr.evaluate()  # uses bound values
+
+# Chaining
+expr.bind(A=np.eye(2)).bind(B=np.ones((2, 2))).evaluate()
+```
+
+#### `expr.substitute(**kwargs)`
+
+Rewrite the expression tree, replacing abstract variables with concrete literals. Unlike `bind()`, this produces a new expression where substituted variables are baked in.
+
+```python
+import numpy as np
+from cm.math import struct, index
+
+A = struct.lin_alg.matrix(rows=2, cols=2, name="A")
+B = struct.lin_alg.matrix(rows=2, cols=2, name="B")
+i = index("i")
+j = index("j")
+
+expr = A[i, j] + B[i, j]
+partial = expr.substitute(A=np.array([[1, 2], [3, 4]]))
+
+# A is now concrete, B is still symbolic
+partial.to_latex()                           # shows concrete A, symbolic B
+partial.evaluate(B=np.array([[5, 6], [7, 8]]), i=0, j=1)  # only B needed
+```
+
+#### `expr.bind_indices(index_map=None, **kwargs)`
+
+Bind symbolic index variables to concrete values or `IndexRange` objects. Returns a `BoundIndexExpression` whose `.evaluate()` iterates over any ranges (cartesian product).
+
+```python
+from cm.math import struct, index
+
+i = index("i")
+j = index("j")
+A = struct.lin_alg.matrix(rows=3, cols=3, name="A")
+
+# kwargs form (names must match index var_names)
+bound = A[i, j].bind_indices(i=0, j=index.range(0, 3))
+results = bound.evaluate(A=np.eye(3))
+
+# dict form (keys are index objects)
+bound = A[i, j].bind_indices({i: 0, j: index.range(0, 3)})
+```
+
+---
+
 ## cm.qm Module
 
 The quantum mechanics module provides tools for working with atoms, molecules, Slater determinants, spin-orbitals, and matrix elements. It includes a powerful Hamiltonian builder for configuring terms and corrections, with support for both non-relativistic and relativistic calculations.
@@ -3343,6 +3869,326 @@ plt.plot(distances, ccsd_energies, label='CCSD(T)/cc-pVTZ')
 plt.xlabel('R (Å)')
 plt.ylabel('Energy (Hartree)')
 plt.legend()
+```
+
+---
+
+## cm.data Module
+
+Access benchmark molecular databases (NIST CCCBDB, PubChem, QM9) to download empirical/reference data and compare it against your ab initio calculations.
+
+```python
+from cm.data import search, get, compare, sync, stats, status
+```
+
+**Supported databases:**
+
+| Source | Description | Size |
+|--------|-------------|------|
+| `pubchem` | Molecular properties, 3D structures, computed properties | On-demand |
+| `nist` | Experimental geometries, energies, vibrational frequencies | On-demand |
+| `qm9` | Pre-computed DFT results (B3LYP/6-31G(2df,p)) | ~134k molecules |
+
+### Searching for Molecules
+
+#### `search(query, *, name=None, formula=None, cas=None, smiles=None, sources=None, limit=20)`
+
+Search benchmark databases for molecules by name, formula, CAS number, or SMILES.
+
+- `query`: General search query (matches name, formula, CAS, or SMILES)
+- `name`: Search by molecule name
+- `formula`: Search by molecular formula
+- `cas`: Search by CAS number
+- `smiles`: Search by SMILES string
+- `sources`: Filter to specific sources: `['pubchem', 'nist', 'qm9']`
+- `limit`: Maximum results (default: 20)
+
+Returns a list of `BenchmarkMolecule` objects.
+
+```python
+from cm.data import search
+
+# Search by name
+results = search("water")
+
+# Search by formula
+results = search(formula="H2O")
+
+# Search by CAS number
+results = search(cas="7732-18-5")
+
+# Filter to specific sources
+results = search("ethanol", sources=["nist", "pubchem"])
+
+# Access result data
+for mol in results:
+    print(f"{mol.name} ({mol.formula}) - CAS: {mol.cas}")
+```
+
+### Getting Molecule Data
+
+#### `get(identifier, sources=None, workspace_id='1', fetch_if_missing=True)`
+
+Get detailed benchmark data for a specific molecule, including geometry and properties.
+
+- `identifier`: CAS number, PubChem CID, SMILES, or InChIKey
+- `sources`: Specific sources to query
+- `workspace_id`: Workspace for storing downloaded files
+- `fetch_if_missing`: If `True`, fetch from external sources when not cached
+
+Returns a `BenchmarkMolecule` with full property data and geometry.
+
+```python
+from cm.data import get
+
+# Get by CAS number
+mol = get("7732-18-5")
+
+# Get by PubChem CID
+mol = get("962")
+
+# Get by name
+mol = get("water")
+
+# Access molecule data
+print(mol.name)              # "Water"
+print(mol.formula)           # "H2O"
+print(mol.molecular_weight)  # 18.015
+print(mol.smiles)            # "O"
+print(mol.sources)           # ["pubchem", "nist"]
+
+# Access properties (energies, dipole moments, etc.)
+for prop in mol.properties:
+    print(f"{prop.name}: {prop.value} {prop.unit} ({prop.source})")
+
+# Get a specific property
+dipole = mol.get_property("dipole_moment")
+homo = mol.get_property("homo_energy", source="qm9")
+
+# Access 3D geometry as XYZ string
+xyz_string = mol.get_xyz()
+
+# Display molecule data as an HTML table in notebook
+mol.render()
+```
+
+#### `BenchmarkMolecule` Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `identifier` | `str` | Unique molecule identifier |
+| `name` | `str` | Molecule name |
+| `formula` | `str` | Molecular formula |
+| `cas` | `str` | CAS number |
+| `smiles` | `str` | SMILES representation |
+| `inchi` | `str` | InChI format |
+| `inchi_key` | `str` | InChI key |
+| `cid` | `int` | PubChem Compound ID |
+| `molecular_weight` | `float` | Molecular mass |
+| `charge` | `int` | Formal charge |
+| `multiplicity` | `int` | Spin multiplicity |
+| `sources` | `list[str]` | Data sources |
+| `properties` | `list[BenchmarkProperty]` | Associated properties |
+| `geometry` | `dict` | Molecular coordinates |
+
+### Comparing Computed vs. Benchmark Data
+
+#### `compare(computed, identifier)`
+
+Compare your computed molecular properties against benchmark/experimental data. Displays a color-coded comparison table.
+
+- `computed`: Dictionary of property name-value pairs, or an `HFResult`/`DFTResult` object from `cm.qm.integrals`
+- `identifier`: Benchmark molecule identifier (CAS, CID, SMILES, InChIKey)
+
+Returns a `ComparisonResult` with property-by-property comparison.
+
+```python
+from cm.qm.integrals import hartree_fock, dipole_moment
+from cm.data import compare
+
+# Run a calculation
+atoms = [('O', (0, 0, 0)), ('H', (0.96, 0, 0)), ('H', (-0.24, 0.93, 0))]
+hf = hartree_fock(atoms, basis='cc-pVTZ')
+dipole = dipole_moment(hf)
+
+# Compare a dictionary of computed values
+comparison = compare(
+    {"total_energy": hf.energy, "dipole_moment": dipole.magnitude},
+    "7732-18-5"  # Water
+)
+
+# Display color-coded comparison table
+# Green (<1%), light green (<5%), orange (<10%), red (>10%)
+comparison.render()
+
+# Access comparison details
+print(f"Properties compared: {comparison.properties_compared}")
+print(f"Average % difference: {comparison.avg_percent_diff:.2f}%")
+
+for comp in comparison.comparisons:
+    print(f"{comp.property}: computed={comp.computed:.4f}, "
+          f"benchmark={comp.benchmark:.4f}, diff={comp.percent_difference:.2f}%")
+```
+
+```python
+# Or pass an HFResult/DFTResult directly (energy and dipole extracted automatically)
+from cm.qm.integrals import hartree_fock
+from cm.data import compare
+
+atoms = [('O', (0, 0, 0)), ('H', (0.96, 0, 0)), ('H', (-0.24, 0.93, 0))]
+hf = hartree_fock(atoms, basis='STO-3G')
+comparison = compare(hf, "7732-18-5")
+comparison.render()
+```
+
+### Syncing Benchmark Databases
+
+#### `sync(sources=None, workspace_id='1')`
+
+Download and index benchmark databases. Required before searching the QM9 dataset.
+
+```python
+from cm.data import sync, wait_for_sync
+
+# Download and index QM9 (~134k molecules)
+sync(['qm9'])
+
+# Wait for completion with progress updates
+wait_for_sync(show_progress=True)
+# Output:
+#   Syncing qm9: 45% (phase: indexing, indexed: 60000)
+#   Syncing qm9: 78% (phase: indexing, indexed: 105000)
+#   Syncing qm9: 100% (phase: complete, indexed: 133885)
+#   Sync complete!
+```
+
+#### `stats()`
+
+Get statistics about indexed benchmark data.
+
+```python
+from cm.data import stats
+
+result = stats()
+print(result)
+# {'sources': {'pubchem': 150, 'nist': 42, 'qm9': 133885}, 'total_molecules': 134077}
+```
+
+#### `wait_for_sync(poll_interval=2.0, timeout=3600, show_progress=True)`
+
+Block until a running sync completes.
+
+- `poll_interval`: Seconds between status checks
+- `timeout`: Maximum seconds to wait (default: 1 hour)
+- `show_progress`: Print progress updates
+
+### Checking Status
+
+#### `status(identifier)`
+
+Check whether a molecule is available in the benchmark database.
+
+- `identifier`: CAS number, PubChem CID, SMILES, or InChIKey
+
+Returns a `MoleculeStatus` object.
+
+```python
+from cm.data import status, get
+
+st = status("7732-18-5")
+
+if st.status == 'indexed':
+    mol = get("7732-18-5")
+elif st.status == 'indexing':
+    print(f"Database indexing in progress: {st.indexing_progress:.0f}%")
+elif st.status == 'not_found':
+    # Fetch from external sources
+    mol = get("7732-18-5", fetch_if_missing=True)
+elif st.status == 'no_index':
+    print("Run sync() to initialize the database")
+```
+
+| Status | Meaning |
+|--------|---------|
+| `'indexed'` | Molecule data is available |
+| `'indexing'` | Database is currently being indexed |
+| `'not_found'` | Not in database (can fetch from external sources) |
+| `'no_index'` | Index doesn't exist yet (run `sync()` first) |
+
+#### `sync_status()`
+
+Get detailed sync progress information.
+
+```python
+from cm.data import sync_status
+
+ss = sync_status()
+print(ss['is_syncing'])       # True/False
+print(ss['total_molecules'])  # Number of indexed molecules
+for job in ss['jobs']:
+    print(f"{job['source']}: {job['progress']}%")
+```
+
+### Complete Workflow Example
+
+```python
+# %% Cell 1 - Sync benchmark data (only needed once)
+from cm.data import sync, wait_for_sync
+sync(['qm9'])
+wait_for_sync()
+
+# %% Cell 2 - Search and retrieve benchmark data
+from cm.data import search, get
+
+results = search(formula="H2O")
+mol = get("7732-18-5")  # Water by CAS number
+mol.render()
+
+# Get experimental geometry
+xyz = mol.get_xyz()
+print(xyz)
+
+# %% Cell 3 - Run computation and compare
+from cm.qm.integrals import hartree_fock, dipole_moment
+from cm.data import compare
+
+# Build atoms list for hartree_fock: (element, (x, y, z))
+water = [
+    ('O', (0, 0, 0)),
+    ('H', (0.96, 0, 0)),
+    ('H', (-0.24, 0.93, 0)),
+]
+hf = hartree_fock(water, basis='cc-pVTZ')
+dipole = dipole_moment(hf)
+
+# Compare HF results with experimental data
+comparison = compare(
+    {"total_energy": hf.energy, "dipole_moment": dipole.magnitude},
+    "7732-18-5"
+)
+comparison.render()
+```
+
+### Error Handling
+
+The module raises specific exceptions with helpful recovery messages:
+
+| Exception | When | Recovery |
+|-----------|------|----------|
+| `NoIndexError` | Benchmark index not created | Run `sync(['qm9'])` |
+| `IndexingInProgressError` | Database is being indexed | Wait with `wait_for_sync()` |
+| `MoleculeNotFoundError` | Molecule not in database | Use `get(id, fetch_if_missing=True)` |
+| `ServiceUnavailableError` | Services not running | Run `docker compose up -d` |
+
+```python
+from cm.data import get, NoIndexError, MoleculeNotFoundError
+
+try:
+    mol = get("7732-18-5")
+except NoIndexError:
+    print("Run sync() first to initialize the database")
+except MoleculeNotFoundError as e:
+    print(f"Molecule not found: {e}")
 ```
 
 ---

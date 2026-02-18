@@ -53,15 +53,22 @@ from typing import Any, Optional, Union
 
 # Read environment variables
 _OUTPUT_FILE = os.environ.get('CM_OUTPUT_FILE', '')
-_CELL_INDEX = int(os.environ.get('CM_CELL_INDEX', '-1'))
 _IS_CELL_FILE = os.environ.get('CM_IS_CELL_FILE', 'false').lower() == 'true'
 _WORKSPACE_DIR = os.environ.get('CM_WORKSPACE_DIR', '')
 
 # Cell delimiter for separating outputs between cells
 CELL_DELIMITER = '<!-- CELL_DELIMITER -->'
 
-# Track outputs for the CURRENT cell only (each cell runs in separate process)
+# Track outputs for the CURRENT cell only
+# _current_cell_index tracks which cell we're accumulating for, so we can
+# reset when the persistent kernel switches to a different cell.
+_current_cell_index: int = -1
 _current_cell_outputs: list[str] = []
+
+
+def _get_cell_index() -> int:
+    """Get current cell index from environment (reads dynamically for persistent kernels)."""
+    return int(os.environ.get('CM_CELL_INDEX', '-1'))
 
 # HTML template
 _HTML_TEMPLATE = '''<!DOCTYPE html>
@@ -191,7 +198,9 @@ def _write_outputs():
     if not output_path:
         return
 
-    cell_idx = _CELL_INDEX if _CELL_INDEX >= 0 else 0
+    cell_idx = _get_cell_index()
+    if cell_idx < 0:
+        cell_idx = 0
 
     if _IS_CELL_FILE:
         # Read existing cells from file
@@ -220,6 +229,14 @@ def _write_outputs():
 
 def _add_output(content: str):
     """Add output content for the current cell."""
+    global _current_cell_index, _current_cell_outputs
+
+    cell_idx = _get_cell_index()
+    if cell_idx != _current_cell_index:
+        # Cell changed (persistent kernel switched cells), reset outputs
+        _current_cell_outputs = []
+        _current_cell_index = cell_idx
+
     _current_cell_outputs.append(content)
     _write_outputs()
 
@@ -397,7 +414,8 @@ def clear():
     Example:
         clear()  # Clear current cell's outputs
     """
-    global _current_cell_outputs
+    global _current_cell_outputs, _current_cell_index
+    _current_cell_index = _get_cell_index()
     _current_cell_outputs = []
     _write_outputs()
 

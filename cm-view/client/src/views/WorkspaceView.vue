@@ -499,12 +499,28 @@ async function fetchHtmlOutputs(filePath) {
   }
 }
 
-// Refresh HTML outputs for the current tab
-async function refreshHtmlOutputs() {
+// Refresh HTML outputs for the current tab (writes to document store)
+// If executedCellIndex is provided, only update that cell's output
+// (avoids overwriting the full array which would break after cell add/delete/reorder)
+async function refreshHtmlOutputs(executedCellIndex) {
   if (activeTabIndex.value >= 0 && activeTabIndex.value < openTabs.value.length) {
     const tab = openTabs.value[activeTabIndex.value]
     const outputs = await fetchHtmlOutputs(tab.path)
-    tab.htmlOutputs = outputs
+
+    if (executedCellIndex !== undefined && executedCellIndex >= 0) {
+      // Targeted update: only refresh the executed cell's output
+      const doc = documentStore.getDocument(tab.path)
+      if (doc && doc.htmlOutputs) {
+        // Ensure array is large enough
+        while (doc.htmlOutputs.length <= executedCellIndex) {
+          doc.htmlOutputs.push('')
+        }
+        doc.htmlOutputs[executedCellIndex] = outputs[executedCellIndex] || ''
+      }
+    } else {
+      // Full refresh (initial load or when no specific cell is known)
+      documentStore.setHtmlOutputs(tab.path, outputs)
+    }
   }
 }
 
@@ -1426,6 +1442,15 @@ async function executeCell(index) {
   cell.status = 'running'
   cell.output = ''
 
+  // Clear HTML output for this cell so stale output doesn't linger during execution
+  const tab = _focusedTab()
+  if (tab) {
+    const doc = documentStore.getDocument(tab.path)
+    if (doc && doc.htmlOutputs && doc.htmlOutputs.length > index) {
+      doc.htmlOutputs[index] = ''
+    }
+  }
+
   // Check if services are healthy before executing
   // Retry up to 12 times (60 seconds) while services are starting
   let servicesReady = false
@@ -1606,8 +1631,9 @@ async function executeCell(index) {
       }
       // Refresh HTML outputs after execution completes
       // Use setTimeout to allow the compute service to write the output file
+      // Only update the specific cell that was executed to avoid misalignment
       setTimeout(() => {
-        refreshHtmlOutputs()
+        refreshHtmlOutputs(index)
       }, 500)
     }
 
@@ -1792,15 +1818,15 @@ async function openFile(file) {
       })
     }
 
-    // Fetch HTML outputs from .out/ directory
+    // Fetch HTML outputs from .out/ directory into document store
     const fileHtmlOutputs = await fetchHtmlOutputs(file.path)
+    documentStore.setHtmlOutputs(file.path, fileHtmlOutputs)
 
     // Add new tab to focused leaf (tab only stores UI state, not content)
     const group = focusedLeaf.value
     group.tabs.push({
       path: file.path,
       name: file.name,
-      htmlOutputs: fileHtmlOutputs,
       previewMode: doc.isMarkdown
     })
 

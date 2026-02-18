@@ -215,6 +215,7 @@ const pythonCompletions = [
   { label: 'struct', type: 'function', detail: 'cm.math: struct' },
   { label: 'numbers', type: 'function', detail: 'cm.math: numbers' },
   { label: 'index', type: 'function', detail: 'cm.math: index' },
+  { label: 'operator', type: 'function', detail: 'cm.math: operator' },
   { label: 'cm.qm', type: 'module', detail: 'Chemical Machines Quantum Mechanics Package' },
   { label: 'from cm.qm import', type: 'text', detail: 'import CM qm' },
   // CM qm - constants

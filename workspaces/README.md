@@ -42,6 +42,9 @@ Complete reference documentation for the `cm` library - a Python library for cre
   - [Special Functions (struct.spec_func)](#special-functions-structspec_func)
   - [Constraints](#constraints)
   - [Variable Binding and Substitution](#variable-binding-and-substitution)
+  - [Symbolic Tensors](#symbolic-tensors)
+  - [Mathematical Functions (struct.lin_alg.fxn)](#mathematical-functions-structlin_algfxn)
+  - [Operators (cm.math.operator)](#operators-cmmathoperator)
 - [cm.qm Module](#cmqm-module)
   - [Atoms](#atoms)
   - [Electron Configurations](#electron-configurations)
@@ -1983,17 +1986,30 @@ The linear algebra structure provides factory functions for creating tensor, vec
 
 #### `struct.lin_alg.tensor(shape=None, dtype=None, name=None, value=None)`
 
-Create a tensor expression. If `value` is provided, the tensor is concrete (eager). Otherwise it is abstract (lazy) and must be bound at evaluation time.
+Create a tensor expression. Behavior depends on arguments:
+
+- **With `value`**: Returns a concrete `Var` expression (eager, backed by a numpy array).
+- **With `shape` but no `value`**: Returns a `SymbolicTensor` whose elements are symbolic expressions. Elements default to zero and can be assigned individually.
+- **No `shape`, no `value`**: Returns an abstract `Var` placeholder that must be bound at evaluation time.
 
 ```python
 # Concrete tensor (has a value)
 A = struct.lin_alg.tensor(shape=(3,3), dtype=numbers.float64, value=np.eye(3), name="A")
 
-# Abstract tensor (no value — a symbolic placeholder)
+# Symbolic tensor (elements are expressions)
+y = struct.lin_alg.scalar(name="y")
+X = struct.lin_alg.tensor(shape=(2,2))
+X[0][0] = y ** 2 + 5
+X[0][1] = y ** 3
+X[1][0] = y
+X[1][1] = y ** 2
+print(X.det().bind(y=3).evaluate())  # symbolic determinant, then evaluate
+
+# Abstract tensor (no shape, no value — a symbolic placeholder)
 B = struct.lin_alg.tensor(shape=(3,3), name="B")
 
 # Fully lazy tensor (no shape, no value)
-X = struct.lin_alg.tensor()
+Z = struct.lin_alg.tensor()
 ```
 
 #### `struct.lin_alg.vector(dim=None, dtype=None, name=None, value=None)`
@@ -2417,6 +2433,178 @@ results = bound.evaluate(A=np.eye(3))
 # dict form (keys are index objects)
 bound = A[i, j].bind_indices({i: 0, j: index.range(0, 3)})
 ```
+
+### Symbolic Tensors
+
+When `struct.lin_alg.tensor(shape=...)` is called without a `value`, it returns a `SymbolicTensor` — a tensor whose elements are symbolic `Expression` nodes. Elements are stored sparsely (unset elements default to zero).
+
+#### Element Assignment
+
+Use chained indexing to assign expression elements:
+
+```python
+from cm.math import struct
+
+y = struct.lin_alg.scalar(name="y")
+
+x = struct.lin_alg.tensor(shape=(2,2))
+x[0][0] = y ** 2 + 5
+x[0][1] = y ** 3
+x[1][0] = y
+x[1][1] = y ** 2
+```
+
+#### Symbolic Determinant and Trace
+
+```python
+d = x.det()       # cofactor expansion → single Expression DAG
+t = x.trace()     # sum of diagonal elements
+
+d.to_latex()       # LaTeX rendering of the symbolic determinant
+d.bind(y=3).evaluate()   # bind variables, then evaluate to a number
+```
+
+#### Symbolic Matrix Multiplication
+
+```python
+w = struct.lin_alg.tensor(shape=(2,2))
+w[0][0] = y ** 2
+w[0][1] = y
+w[1][0] = y + 1
+w[1][1] = y ** 3
+
+z = x @ w          # symbolic matmul — each element is an Expression
+z.bind(y=2).evaluate()   # evaluate to numpy array
+```
+
+#### Evaluation and Rendering
+
+```python
+# Bind variables and evaluate to numpy array
+result = x.bind(y=3).evaluate()
+
+# Or pass bindings directly to evaluate
+result = x.evaluate(y=3)
+
+# Render as LaTeX pmatrix
+x.to_latex()       # \begin{pmatrix} ... \end{pmatrix}
+x.render()         # HTML output via cm.views
+```
+
+### Mathematical Functions (struct.lin_alg.fxn)
+
+The `fxn` sub-module provides elementary mathematical functions that operate on scalar expressions. Each function returns a new `Expression` node in the DAG with full support for all three backends (eager/NumPy, PyTorch, LaTeX).
+
+```python
+from cm.math import struct
+from cm.math.struct.lin_alg import fxn
+
+y = struct.lin_alg.scalar(name="y")
+```
+
+#### Available Functions
+
+| Function | Description | LaTeX |
+|----------|-------------|-------|
+| `fxn.sin(expr)` | Sine | `\sin\left(\cdot\right)` |
+| `fxn.cos(expr)` | Cosine | `\cos\left(\cdot\right)` |
+| `fxn.tan(expr)` | Tangent | `\tan\left(\cdot\right)` |
+| `fxn.exp(expr)` | Exponential | `\exp\left(\cdot\right)` |
+| `fxn.log(expr)` | Natural logarithm | `\ln\left(\cdot\right)` |
+| `fxn.sqrt(expr)` | Square root | `\sqrt{\cdot}` |
+| `fxn.abs(expr)` | Absolute value | `\left\|\cdot\right\|` |
+| `fxn.asin(expr)` | Inverse sine | `\arcsin\left(\cdot\right)` |
+| `fxn.acos(expr)` | Inverse cosine | `\arccos\left(\cdot\right)` |
+| `fxn.atan(expr)` | Inverse tangent | `\arctan\left(\cdot\right)` |
+| `fxn.sinh(expr)` | Hyperbolic sine | `\sinh\left(\cdot\right)` |
+| `fxn.cosh(expr)` | Hyperbolic cosine | `\cosh\left(\cdot\right)` |
+| `fxn.tanh(expr)` | Hyperbolic tangent | `\tanh\left(\cdot\right)` |
+
+#### Usage with Expressions
+
+Functions compose naturally with arithmetic and can be used as tensor elements:
+
+```python
+expr = fxn.sin(y) ** 2 + fxn.cos(y) ** 2   # Pythagorean identity
+expr.bind(y=1.0).evaluate()                  # => 1.0
+
+# As tensor elements
+x = struct.lin_alg.tensor(shape=(2,2))
+x[0][0] = fxn.exp(y)
+x[1][1] = fxn.cos(y)
+x[0][1] = y ** 3
+x[1][0] = fxn.sin(y)
+
+x.det().bind(y=0.5).evaluate()
+```
+
+### Operators (cm.math.operator)
+
+The operator module provides operator objects that transform expressions when applied. Operators integrate with `SymbolicTensor` matrix multiplication — when an operator element is matmul'd with an expression element, it calls `.apply()` instead of standard multiplication.
+
+```python
+from cm.math import struct, operator as op
+```
+
+#### `op.derivative(var, order=1)`
+
+Create a derivative operator with respect to a variable.
+
+```python
+y = struct.lin_alg.scalar(name="y")
+
+d_dy = op.derivative(y)        # first derivative d/dy
+d2_dy2 = op.derivative(y, 2)   # second derivative d²/dy²
+```
+
+#### Applying Operators
+
+Operators can be applied directly to expressions:
+
+```python
+from cm.math.struct.lin_alg import fxn
+
+expr = y ** 3 + fxn.sin(y)
+result = d_dy.apply(expr)       # 3y² + cos(y)
+result.bind(y=1.0).evaluate()
+```
+
+#### Operator Algebra with Tensors
+
+Operators can be placed as elements of a `SymbolicTensor`. When the tensor is matmul'd with another tensor, operator elements differentiate the corresponding elements instead of multiplying:
+
+```python
+# Operator matrix
+J = struct.lin_alg.tensor(shape=(2,2))
+J[0][0] = op.derivative(y) + y ** 2    # (d/dy + y²)
+J[0][1] = op.derivative(y, 2)          # d²/dy²
+J[1][0] = op.derivative(y)             # d/dy
+J[1][1] = op.derivative(y)             # d/dy
+
+# Expression matrix
+x = struct.lin_alg.tensor(shape=(2,1))
+x[0][0] = y ** 3
+x[1][0] = fxn.sin(y)
+
+# Matmul applies operators to expressions
+result = J @ x
+result.bind(y=2.0).evaluate()
+```
+
+When an operator has a scalar part (e.g., `op.derivative(y) + y**2`), applying it to `f` produces `f' + y²·f`.
+
+#### Supported Differentiation Rules
+
+The symbolic differentiation engine supports:
+
+| Rule | Example |
+|------|---------|
+| Power rule | `d/dy(y³) = 3y²` |
+| Product rule | `d/dy(f·g) = f'·g + f·g'` |
+| Quotient rule | `d/dy(f/g) = (f'·g - f·g') / g²` |
+| Chain rule | `d/dy(sin(y²)) = cos(y²)·2y` |
+| Linearity | `d/dy(f + g) = f' + g'` |
+| All `fxn` functions | `sin, cos, tan, exp, log, sqrt, asin, acos, atan, sinh, cosh, tanh` |
 
 ---
 

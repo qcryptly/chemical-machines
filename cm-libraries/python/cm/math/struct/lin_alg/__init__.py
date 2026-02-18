@@ -46,11 +46,22 @@ def tensor(shape=None, dtype=None, name=None, value=None):
         value: Concrete numpy array or scalar. If provided, tensor is eager.
 
     Returns:
-        A Var Expression bound to the linear_algebra structure.
+        A SymbolicTensor if shape is given with no value (supports element
+        assignment), or a Var if a concrete value is provided.
     """
     if name is None:
         Var._var_counter += 1
         name = f"T_{Var._var_counter}"
+
+    # If shape given but no value, return a SymbolicTensor for element assignment
+    if shape is not None and value is None:
+        from ...tensor import SymbolicTensor
+        return SymbolicTensor(
+            shape=shape,
+            structure=LINEAR_ALGEBRA,
+            name=name,
+            dtype=dtype,
+        )
 
     actual_shape = shape
     if value is not None and actual_shape is None:
@@ -112,3 +123,6 @@ def scalar(value=None, dtype=None, name=None):
 
 # Register backends on import
 register_lin_alg_ops()
+
+# Sub-modules
+from . import fxn

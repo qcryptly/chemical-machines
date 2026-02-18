@@ -18,6 +18,7 @@ Usage:
 
 from . import struct
 from . import numbers
+from . import operator
 from .index import index, IndexedExpression
 
-__all__ = ['struct', 'numbers', 'index', 'IndexedExpression']
+__all__ = ['struct', 'numbers', 'index', 'IndexedExpression', 'operator']

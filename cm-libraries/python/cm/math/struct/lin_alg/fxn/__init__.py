@@ -10,9 +10,11 @@ Usage:
 from .ops import (
     sin, cos, tan, exp, log, sqrt, fabs as abs,
     asin, acos, atan, sinh, cosh, tanh,
+    krok_delta,
 )
 
 __all__ = [
     'sin', 'cos', 'tan', 'exp', 'log', 'sqrt', 'abs',
     'asin', 'acos', 'atan', 'sinh', 'cosh', 'tanh',
+    'krok_delta',
 ]

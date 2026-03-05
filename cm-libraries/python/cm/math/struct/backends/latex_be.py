@@ -102,6 +102,9 @@ class LatexBackend:
 def _render_var(var):
     """Render a Var to LaTeX. Replicates cm.symbols Var.to_latex() exactly."""
     from ..base import Var
+    # If the Var has a concrete value (e.g. after substitute), render the value
+    if var.value is not None:
+        return _render_scalar_value(var.value)
     name = var.var_name
     is_tensor = var.metadata.get('is_tensor', False)
 
@@ -128,6 +131,33 @@ def _render_var(var):
     if is_tensor:
         return rf"\mathbf{{{name}}}"
     return name
+
+
+def _render_scalar_value(val):
+    """Render a numeric value to LaTeX."""
+    import numpy as np
+    if isinstance(val, np.ndarray):
+        if val.ndim == 0:
+            return _render_scalar_value(val.item())
+        # Render as matrix
+        if val.ndim == 2:
+            rows = []
+            for i in range(val.shape[0]):
+                row_parts = [_render_scalar_value(val[i, j]) for j in range(val.shape[1])]
+                rows.append(" & ".join(row_parts))
+            body = r" \\ ".join(rows)
+            return rf"\begin{{pmatrix}} {body} \end{{pmatrix}}"
+        # 1D as column
+        parts = [_render_scalar_value(v) for v in val]
+        body = r" \\ ".join(parts)
+        return rf"\begin{{pmatrix}} {body} \end{{pmatrix}}"
+    if isinstance(val, int):
+        return str(val)
+    if isinstance(val, float):
+        if abs(val - int(val)) < 1e-10:
+            return str(int(val))
+        return f"{val:.6g}"
+    return str(val)
 
 
 def _render_scalar(scalar):

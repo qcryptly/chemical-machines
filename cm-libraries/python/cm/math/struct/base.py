@@ -264,10 +264,16 @@ class Expression:
         return _make_binop("sub", other, self)
 
     def __mul__(self, other):
+        from ..tensor import SymbolicTensor
+        if isinstance(other, SymbolicTensor):
+            return NotImplemented
         other = _ensure_expression(other, self.structure)
         return _make_binop("mul", self, other)
 
     def __rmul__(self, other):
+        from ..tensor import SymbolicTensor
+        if isinstance(other, SymbolicTensor):
+            return NotImplemented
         other = _ensure_expression(other, self.structure)
         return _make_binop("mul", other, self)
 

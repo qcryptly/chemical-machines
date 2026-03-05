@@ -2,11 +2,13 @@
 Elementary mathematical function operations and backend registrations.
 
 Operations: sin, cos, tan, exp, log, sqrt, abs,
-            asin, acos, atan, sinh, cosh, tanh
+            asin, acos, atan, sinh, cosh, tanh,
+            krok_delta
 """
 
 from __future__ import annotations
-from ...base import Expression, Operation, _ensure_expression
+import numbers as _numbers
+from ...base import Expression, ScalarExpr, Operation, _ensure_expression
 
 
 # ---- Operation definitions ----
@@ -24,6 +26,7 @@ _atan_op = Operation("atan", arity=1, latex_name="arctan")
 _sinh_op = Operation("sinh", arity=1, latex_name="sinh")
 _cosh_op = Operation("cosh", arity=1, latex_name="cosh")
 _tanh_op = Operation("tanh", arity=1, latex_name="tanh")
+_krok_delta_op = Operation("krok_delta", arity=2, latex_name="delta")
 
 
 # ---- Factory functions ----
@@ -92,6 +95,22 @@ def tanh(expr):
     return _make_fxn(_tanh_op, expr)
 
 
+def krok_delta(a, b):
+    """Kronecker delta: delta(a, b) = 1 if a == b, else 0."""
+    if isinstance(a, _numbers.Number) and isinstance(b, _numbers.Number):
+        return 1.0 if a == b else 0.0
+    if not isinstance(a, Expression):
+        a = _ensure_expression(a, None)
+    if not isinstance(b, Expression):
+        b = _ensure_expression(b, a.structure)
+    return Expression(
+        op=_krok_delta_op,
+        children=[a, b],
+        structure=a.structure,
+        metadata={'shape': (), 'is_scalar': True},
+    )
+
+
 # ---- Backend registrations ----
 
 def register_fxn_ops():
@@ -119,6 +138,8 @@ def _register_eager():
     eager_backend.register(S, "sinh", lambda a: np.sinh(a))
     eager_backend.register(S, "cosh", lambda a: np.cosh(a))
     eager_backend.register(S, "tanh", lambda a: np.tanh(a))
+    eager_backend.register(S, "krok_delta",
+        lambda a, b: np.float64(1.0) if np.array_equal(np.asarray(a), np.asarray(b)) else np.float64(0.0))
 
 
 def _register_torch():
@@ -146,6 +167,14 @@ def _register_torch():
     torch_backend.register(S, "cosh", _make_torch("cosh"))
     torch_backend.register(S, "tanh", _make_torch("tanh"))
 
+    def _torch_krok_delta(a, b):
+        import torch
+        if torch.equal(a, b):
+            return torch.tensor(1.0, dtype=torch.float64, device=a.device)
+        return torch.tensor(0.0, dtype=torch.float64, device=a.device)
+
+    torch_backend.register(S, "krok_delta", _torch_krok_delta)
+
 
 def _register_latex():
     from ...backends.latex_be import latex_backend
@@ -170,6 +199,8 @@ def _register_latex():
     latex_backend.register(S, "sinh", _make_latex("sinh"))
     latex_backend.register(S, "cosh", _make_latex("cosh"))
     latex_backend.register(S, "tanh", _make_latex("tanh"))
+    latex_backend.register(S, "krok_delta",
+        lambda child_a, child_b, **kw: rf"\delta_{{{child_a} {child_b}}}")
 
 
 # Auto-register on import

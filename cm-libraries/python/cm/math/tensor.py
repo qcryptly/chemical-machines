@@ -76,6 +76,30 @@ class SymbolicTensor:
         return self._structure
 
     @property
+    def value(self):
+        """Get concrete numpy array if all elements are ScalarExpr, else None."""
+        import numpy as np
+        result = np.empty(self._shape, dtype=np.float64)
+        for idx in _iter_indices(self._shape):
+            expr = self._elements.get(idx, ScalarExpr(0, self._structure))
+            if isinstance(expr, ScalarExpr):
+                result[idx] = expr.scalar_value
+            else:
+                return None
+        return result
+
+    @value.setter
+    def value(self, arr):
+        """Set concrete values from a numpy array or nested list."""
+        import numpy as np
+        arr = np.asarray(arr)
+        if arr.shape != self._shape:
+            raise ValueError(f"Shape mismatch: expected {self._shape}, got {arr.shape}")
+        for idx in _iter_indices(self._shape):
+            self._elements[idx] = ScalarExpr(float(arr[idx]), self._structure)
+        self._is_composite = True
+
+    @property
     def metadata(self):
         return {
             'shape': self._shape,
@@ -110,6 +134,30 @@ class SymbolicTensor:
         if len(key) < len(self._shape):
             return SymbolicTensorSlice(self, key)
         return self._get_element(*key)
+
+    # ---- Scalar broadcasting ----
+
+    def __mul__(self, other):
+        """Scalar * tensor broadcast: multiply each element by a scalar expression."""
+        if isinstance(other, SymbolicTensor):
+            raise TypeError("Use @ for matrix multiplication; element-wise mul between tensors not yet supported")
+        if not isinstance(other, Expression):
+            other = _ensure_expression(other, self._structure)
+        result = SymbolicTensor(shape=self._shape, structure=self._structure)
+        for idx in _iter_indices(self._shape):
+            result._elements[idx] = self._get_element(*idx) * other
+        result._is_composite = True
+        return result
+
+    def __rmul__(self, other):
+        """tensor * scalar broadcast (commutative)."""
+        if not isinstance(other, Expression):
+            other = _ensure_expression(other, self._structure)
+        result = SymbolicTensor(shape=self._shape, structure=self._structure)
+        for idx in _iter_indices(self._shape):
+            result._elements[idx] = other * self._get_element(*idx)
+        result._is_composite = True
+        return result
 
     # ---- Symbolic linear algebra ----
 
@@ -152,6 +200,13 @@ class SymbolicTensor:
             result = result + self._get_element(i, i)
         return result
 
+    def free_vars(self):
+        """Return all free Var nodes across element expressions as a sorted tuple."""
+        all_vars = set()
+        for expr in self._elements.values():
+            all_vars |= expr._get_free_variables()
+        return tuple(sorted(all_vars, key=lambda v: v.var_name))
+
     def __matmul__(self, other):
         """Symbolic matrix multiplication."""
         if not isinstance(other, SymbolicTensor):
@@ -186,23 +241,64 @@ class SymbolicTensor:
 
     # ---- Binding and evaluation ----
 
+    def bind_indices(self, *args, **kwargs):
+        """Bind index ranges for iteration during evaluate().
+
+        Positional args specify ranges per dimension:
+            x.bind_indices(index.range(2), index.range(2))
+
+        Keyword args bind named index variables (same as Expression):
+            x.bind_indices(i=0, j=index.range(3))
+
+        Returns self for chaining.
+        """
+        self._dim_ranges = args if args else None
+        self._index_kwargs = kwargs
+        return self
+
     def bind(self, value_or_dict=None, **kwargs):
         """Bind values to free variables in element expressions.
 
-        Accepts dict with Var keys, or kwargs (resolved via caller scope).
+        Accepts:
+            - A numpy array or nested list: sets concrete element values (like .value = ...)
+            - A dict with Var keys: binds variables by Var reference
+            - Keyword args: binds variables by name (resolved via caller scope)
         """
-        if value_or_dict is not None and isinstance(value_or_dict, dict):
-            for key, val in value_or_dict.items():
-                if isinstance(key, Var):
-                    self._bindings[key.var_name] = val
-                else:
-                    self._bindings[key] = val
+        import numpy as np
+        if value_or_dict is not None:
+            if isinstance(value_or_dict, dict):
+                for key, val in value_or_dict.items():
+                    if isinstance(key, Var):
+                        self._bindings[key.var_name] = val
+                    else:
+                        self._bindings[key] = val
+            elif isinstance(value_or_dict, (np.ndarray, list, tuple)):
+                self.value = value_or_dict
+                return self
+            else:
+                self._bindings[str(value_or_dict)] = value_or_dict
         self._bindings.update(_resolve_kwargs(kwargs))
+        return self
+
+    def unbind(self, *vars):
+        """Remove variable bindings.
+
+        With no args: clears all bindings.
+        With Var args: removes only those variables.
+        With string args: removes by name.
+        """
+        if not vars:
+            self._bindings.clear()
+        else:
+            for v in vars:
+                name = v.var_name if isinstance(v, Var) else str(v)
+                self._bindings.pop(name, None)
         return self
 
     def evaluate(self, bindings_dict=None, **kwargs):
         """Evaluate all elements, return numpy array."""
         import numpy as np
+        import itertools
 
         merged = {**self._bindings}
         if bindings_dict is not None:
@@ -213,16 +309,27 @@ class SymbolicTensor:
                     merged[key] = val
         merged.update(_resolve_kwargs(kwargs))
 
-        result = np.empty(self._shape, dtype=np.float64)
-        for idx in _iter_indices(self._shape):
-            expr = self._elements.get(idx, ScalarExpr(0, self._structure))
-            result[idx] = expr.evaluate(**merged)
+        # Use dimension ranges from bind_indices if set, else full shape
+        dim_ranges = getattr(self, '_dim_ranges', None)
+        if dim_ranges:
+            ranges = [list(r) for r in dim_ranges]
+            out_shape = tuple(len(r) for r in ranges)
+            result = np.empty(out_shape, dtype=np.float64)
+            for out_idx in itertools.product(*(range(s) for s in out_shape)):
+                src_idx = tuple(ranges[d][out_idx[d]] for d in range(len(out_shape)))
+                expr = self._elements.get(src_idx, ScalarExpr(0, self._structure))
+                result[out_idx] = expr.evaluate(**merged)
+        else:
+            result = np.empty(self._shape, dtype=np.float64)
+            for idx in _iter_indices(self._shape):
+                expr = self._elements.get(idx, ScalarExpr(0, self._structure))
+                result[idx] = expr.evaluate(**merged)
         return result
 
     # ---- LaTeX and rendering ----
 
     def to_latex(self):
-        """Render as pmatrix LaTeX."""
+        """Render as pmatrix LaTeX. Applies any stored bindings as substitutions."""
         if len(self._shape) != 2:
             raise NotImplementedError("to_latex only supports 2D tensors")
         rows = []
@@ -230,6 +337,8 @@ class SymbolicTensor:
             row_parts = []
             for j in range(self._shape[1]):
                 elem = self._get_element(i, j)
+                if self._bindings:
+                    elem = elem.substitute(**self._bindings)
                 row_parts.append(elem.to_latex())
             rows.append(" & ".join(row_parts))
         body = r" \\ ".join(rows)

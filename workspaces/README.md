@@ -45,6 +45,7 @@ Complete reference documentation for the `cm` library - a Python library for cre
   - [Symbolic Tensors](#symbolic-tensors)
   - [Mathematical Functions (struct.lin_alg.fxn)](#mathematical-functions-structlin_algfxn)
   - [Operators (cm.math.operator)](#operators-cmmathoperator)
+  - [Differentiation (diff, jacobian, hessian)](#differentiation-diff-jacobian-hessian)
 - [cm.qm Module](#cmqm-module)
   - [Atoms](#atoms)
   - [Electron Configurations](#electron-configurations)
@@ -2035,6 +2036,7 @@ Create a scalar expression.
 
 ```python
 c = struct.lin_alg.scalar(name="c")         # abstract scalar variable
+c = struct.lin_alg.scalar("c")              # shorthand (string → name)
 k = struct.lin_alg.scalar(value=2.5)        # concrete scalar constant
 ```
 
@@ -2302,22 +2304,36 @@ results = A[i, j].bind_indices(
 
 ### Special Functions (struct.spec_func)
 
-#### `struct.spec_func.krok_delta(a, b)`
+`krok_delta` now lives in `struct.lin_alg.fxn` and is re-exported from `struct.spec_func` for backwards compatibility. Both access paths work:
+
+```python
+from cm.math.struct.lin_alg import fxn
+from cm.math import struct
+
+# Preferred (via fxn)
+fxn.krok_delta(a, b)
+
+# Also works (backwards compatible)
+struct.spec_func.krok_delta(a, b)
+```
+
+#### `fxn.krok_delta(a, b)`
 
 Kronecker delta function: returns 1 if `a == b`, else 0. Works with all three backends.
 
 ```python
 from cm.math import struct, index
+from cm.math.struct.lin_alg import fxn
 
 i = index("i")
 j = index("j")
 
 # Symbolic expression
-delta = struct.spec_func.krok_delta(i, j)
+delta = fxn.krok_delta(i, j)
 delta.to_latex()  # => \delta_{i j}
 
 # Evaluate over index ranges
-expr = struct.spec_func.krok_delta(i, j)
+expr = fxn.krok_delta(i, j)
 results = expr.bind_indices(
     i=index.range(0, 3),
     j=index.range(0, 3)
@@ -2329,7 +2345,7 @@ The Kronecker delta can also be used with indexed tensor expressions:
 
 ```python
 A = struct.lin_alg.matrix(rows=3, cols=3, name="A")
-expr = struct.spec_func.krok_delta(A[i, 0], A[j, 0])
+expr = fxn.krok_delta(A[i, 0], A[j, 0])
 ```
 
 ### Constraints
@@ -2454,6 +2470,40 @@ x[1][0] = y
 x[1][1] = y ** 2
 ```
 
+#### Concrete Values
+
+Set all elements at once from a numpy array using `.value` or `.bind(array)`:
+
+```python
+import numpy as np
+
+spin = struct.lin_alg.tensor(shape=(2,1))
+spin.value = np.array([[0], [1]])           # set via property
+# or
+spin.bind(np.array([[0], [1]]))             # set via bind (chainable)
+
+spin.value         # => array([[0.], [1.]])  (get as numpy array)
+spin.to_latex()    # => \begin{pmatrix} 0 \\ 1 \end{pmatrix}
+```
+
+#### Scalar Broadcasting
+
+Multiply a `SymbolicTensor` by a scalar expression to broadcast across all elements:
+
+```python
+x = struct.lin_alg.scalar("x")
+y = struct.lin_alg.scalar("y")
+
+spin = struct.lin_alg.tensor(shape=(2,1))
+spin.value = np.array([[1], [2]])
+
+scal = x ** 2 + y
+spin_orb = spin * scal     # each element multiplied by (x² + y)
+spin_orb = scal * spin     # same result (commutative)
+
+spin_orb.bind(x=5, y=2).evaluate()   # => [[27.], [54.]]
+```
+
 #### Symbolic Determinant and Trace
 
 ```python
@@ -2491,6 +2541,28 @@ x.to_latex()       # \begin{pmatrix} ... \end{pmatrix}
 x.render()         # HTML output via cm.views
 ```
 
+Bound variables are shown as substituted values in LaTeX/render output:
+
+```python
+spin_orb.bind(x=5, y=2)
+spin_orb.render()          # renders with 5² + 2 instead of x² + y
+```
+
+#### `tensor.unbind(*vars)`
+
+Remove variable bindings. With no args, clears all bindings. With `Var` or string args, removes only those.
+
+```python
+spin_orb.bind(x=5, y=2)
+spin_orb.to_latex()        # shows 5² + 2
+
+spin_orb.unbind(y)         # remove only y
+spin_orb.to_latex()        # shows 5² + y
+
+spin_orb.unbind()          # remove all
+spin_orb.to_latex()        # shows x² + y
+```
+
 ### Mathematical Functions (struct.lin_alg.fxn)
 
 The `fxn` sub-module provides elementary mathematical functions that operate on scalar expressions. Each function returns a new `Expression` node in the DAG with full support for all three backends (eager/NumPy, PyTorch, LaTeX).
@@ -2519,6 +2591,7 @@ y = struct.lin_alg.scalar(name="y")
 | `fxn.sinh(expr)` | Hyperbolic sine | `\sinh\left(\cdot\right)` |
 | `fxn.cosh(expr)` | Hyperbolic cosine | `\cosh\left(\cdot\right)` |
 | `fxn.tanh(expr)` | Hyperbolic tangent | `\tanh\left(\cdot\right)` |
+| `fxn.krok_delta(a, b)` | Kronecker delta (1 if a==b, else 0) | `\delta_{a\,b}` |
 
 #### Usage with Expressions
 
@@ -2605,6 +2678,71 @@ The symbolic differentiation engine supports:
 | Chain rule | `d/dy(sin(y²)) = cos(y²)·2y` |
 | Linearity | `d/dy(f + g) = f' + g'` |
 | All `fxn` functions | `sin, cos, tan, exp, log, sqrt, asin, acos, atan, sinh, cosh, tanh` |
+
+### Differentiation (diff, jacobian, hessian)
+
+General-purpose N-order symbolic differentiation. Computes derivative tensors from scalar expressions or `SymbolicTensor` inputs. The output shape is `input_shape + (n_vars,) * order`.
+
+#### `struct.lin_alg.diff(expr, vars=None, order=1)`
+
+Compute the Nth-order differential. Accepts a scalar `Expression` or `SymbolicTensor`. If `vars` is not provided, free variables are auto-collected (sorted by name).
+
+```python
+from cm.math import struct
+from cm.math.struct.lin_alg import fxn
+
+y1 = struct.lin_alg.scalar("y1")
+y2 = struct.lin_alg.scalar("y2")
+
+f = y1 ** 2 + fxn.sin(y2)
+
+# Gradient (order 1 of scalar) → shape (n_vars,)
+grad = struct.lin_alg.diff(f, order=1)        # shape (2,)
+grad.bind(y1=1.0, y2=0.5).evaluate()          # [2.0, cos(0.5)]
+
+# Hessian (order 2 of scalar) → shape (n_vars, n_vars)
+H = struct.lin_alg.diff(f, order=2)            # shape (2, 2)
+H.bind(y1=1.0, y2=0.5).evaluate()             # [[2, 0], [0, -sin(0.5)]]
+
+# 3rd order → shape (n_vars, n_vars, n_vars)
+T = struct.lin_alg.diff(f, order=3)            # shape (2, 2, 2)
+```
+
+#### `struct.lin_alg.jacobian(expr, vars=None)`
+
+First-order differential (alias for `diff(expr, vars, order=1)`). When applied to a vector-valued `SymbolicTensor`, produces the Jacobian matrix.
+
+```python
+v = struct.lin_alg.tensor(shape=(2,))
+v[(0,)] = y1 ** 2 + fxn.sin(y2)
+v[(1,)] = y1 * y2 + fxn.exp(y1)
+
+J = struct.lin_alg.jacobian(v)                 # shape (2, 2)
+J.bind(y1=1.0, y2=2.0).evaluate()
+# [[2*y1,       cos(y2)    ],
+#  [y2+exp(y1), y1         ]]
+```
+
+#### `struct.lin_alg.hessian(expr, vars=None)`
+
+Second-order differential (alias for `diff(expr, vars, order=2)`).
+
+```python
+H = struct.lin_alg.hessian(f)                  # shape (2, 2)
+H.bind(y1=1.0, y2=0.5).evaluate()             # [[2, 0], [0, -sin(0.5)]]
+```
+
+#### `tensor.free_vars()`
+
+Returns all free `Var` nodes across all element expressions as a tuple (sorted by name). Used internally by `diff()` when `vars` is not specified.
+
+```python
+v = struct.lin_alg.tensor(shape=(2,))
+v[(0,)] = y1 ** 2 + fxn.sin(y2)
+v[(1,)] = y1 * y2
+
+v.free_vars()                                  # (y1, y2)
+```
 
 ---
 

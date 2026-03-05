@@ -21,7 +21,7 @@ from ..base import Structure, Signature, Expression, Var, ScalarExpr
 from .ops import register_lin_alg_ops, LIN_ALG_OPS
 from .axioms import LIN_ALG_AXIOMS
 
-__all__ = ['tensor', 'vector', 'matrix', 'scalar', 'LINEAR_ALGEBRA']
+__all__ = ['tensor', 'vector', 'matrix', 'scalar', 'diff', 'jacobian', 'hessian', 'LINEAR_ALGEBRA']
 
 # Build the structure
 _signature = Signature()
@@ -106,6 +106,10 @@ def matrix(rows=None, cols=None, dtype=None, name=None, value=None):
 
 def scalar(value=None, dtype=None, name=None):
     """Create a scalar expression."""
+    # If value is a string, treat it as a name (convenience shorthand)
+    if isinstance(value, str):
+        name = value
+        value = None
     if value is not None and name is None:
         return ScalarExpr(value, LINEAR_ALGEBRA)
     if name is None:
@@ -119,6 +123,68 @@ def scalar(value=None, dtype=None, name=None):
         dtype=dtype,
         is_tensor=False,
     )
+
+
+def diff(expr, vars=None, order=1):
+    """Compute the Nth-order differential of an expression or symbolic tensor.
+
+    Args:
+        expr: A scalar Expression or SymbolicTensor.
+        vars: Tuple of Var nodes to differentiate with respect to.
+               If None, auto-collects free variables (sorted by name).
+        order: Derivative order. 1 = Jacobian/gradient, 2 = Hessian, etc.
+
+    Returns:
+        SymbolicTensor with shape input_shape + (n_vars,) * order.
+    """
+    import itertools
+    from ...tensor import SymbolicTensor
+    from ...operator.diff import differentiate
+
+    # Handle scalar Expression input
+    if isinstance(expr, Expression):
+        if vars is None:
+            vars = tuple(sorted(expr._get_free_variables(), key=lambda v: v.var_name))
+        n = len(vars)
+        out_shape = (n,) * order
+        result = SymbolicTensor(shape=out_shape, structure=LINEAR_ALGEBRA)
+        for idx in itertools.product(range(n), repeat=order):
+            d = expr
+            for dim in idx:
+                d = differentiate(d, vars[dim])
+            result._elements[idx] = d
+        result._is_composite = True
+        return result
+
+    # Handle SymbolicTensor input
+    if isinstance(expr, SymbolicTensor):
+        if vars is None:
+            vars = expr.free_vars()
+        n = len(vars)
+        in_shape = expr.shape
+        out_shape = in_shape + (n,) * order
+        result = SymbolicTensor(shape=out_shape, structure=expr._structure)
+        for in_idx in itertools.product(*(range(s) for s in in_shape)):
+            elem = expr._get_element(*in_idx)
+            for var_idx in itertools.product(range(n), repeat=order):
+                d = elem
+                for dim in var_idx:
+                    d = differentiate(d, vars[dim])
+                result._elements[in_idx + var_idx] = d
+            result._is_composite = True
+        return result
+
+    raise TypeError(f"diff() expects Expression or SymbolicTensor, got {type(expr).__name__}")
+
+
+def jacobian(expr, vars=None):
+    """First-order differential (Jacobian). Alias for diff(expr, vars, order=1)."""
+    return diff(expr, vars=vars, order=1)
+
+
+def hessian(expr, vars=None):
+    """Second-order differential (Hessian). Alias for diff(expr, vars, order=2)."""
+    return diff(expr, vars=vars, order=2)
 
 
 # Register backends on import

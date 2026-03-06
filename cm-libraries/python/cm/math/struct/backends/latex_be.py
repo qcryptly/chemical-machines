@@ -105,7 +105,7 @@ def _render_var(var):
     # If the Var has a concrete value (e.g. after substitute), render the value
     if var.value is not None:
         return _render_scalar_value(var.value)
-    name = var.var_name
+    name = var.name
     is_tensor = var.metadata.get('is_tensor', False)
 
     # Check for Greek letters
@@ -151,6 +151,22 @@ def _render_scalar_value(val):
         parts = [_render_scalar_value(v) for v in val]
         body = r" \\ ".join(parts)
         return rf"\begin{{pmatrix}} {body} \end{{pmatrix}}"
+    if isinstance(val, complex):
+        real, imag = val.real, val.imag
+        if abs(real) < 1e-10 and abs(imag) < 1e-10:
+            return "0"
+        if abs(real) < 1e-10:
+            if abs(imag - 1.0) < 1e-10:
+                return "i"
+            if abs(imag + 1.0) < 1e-10:
+                return "-i"
+            return f"{imag:.6g}i"
+        if abs(imag) < 1e-10:
+            if abs(real - int(real)) < 1e-10:
+                return str(int(real))
+            return f"{real:.6g}"
+        sign = "+" if imag > 0 else "-"
+        return f"({real:.6g} {sign} {abs(imag):.6g}i)"
     if isinstance(val, int):
         return str(val)
     if isinstance(val, float):
@@ -165,6 +181,8 @@ def _render_scalar(scalar):
     val = scalar.scalar_value
     if isinstance(val, complex):
         real, imag = val.real, val.imag
+        if abs(real) < 1e-10 and abs(imag) < 1e-10:
+            return "0"
         if abs(real) < 1e-10:
             if abs(imag - 1.0) < 1e-10:
                 return "i"

@@ -35,14 +35,14 @@ class TorchGraph:
         self._backend = backend
         self._pre_bindings = bindings or {}
         self._input_vars = sorted(
-            v.var_name for v in expr._get_free_variables()
-            if v.var_name not in self._pre_bindings
+            v.name for v in expr._get_free_variables()
+            if v.name not in self._pre_bindings
         )
 
     def __call__(self, **kwargs):
         torch = _get_torch()
         merged = {**self._pre_bindings, **kwargs}
-        all_vars = sorted(v.var_name for v in self._expr._get_free_variables())
+        all_vars = sorted(v.name for v in self._expr._get_free_variables())
         missing = set(all_vars) - set(merged.keys())
         if missing:
             raise ValueError(f"Missing input variables: {missing}")
@@ -103,7 +103,7 @@ class TorchBackend:
                 if not isinstance(val, torch.Tensor):
                     val = torch.tensor(val, dtype=torch.float64)
                 return val.to(device)
-            name = expr.var_name
+            name = expr.name
             if name in bindings:
                 return bindings[name]
             raise ValueError(f"Unbound variable '{name}' in torch evaluation")

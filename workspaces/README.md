@@ -2470,13 +2470,26 @@ x[1][0] = y
 x[1][1] = y ** 2
 ```
 
+#### Immediate Value Binding
+
+Pass a numpy array or nested list directly to `tensor()` to create a concrete `SymbolicTensor`:
+
+```python
+import numpy as np
+
+spin = struct.lin_alg.tensor(np.array([[0], [1]]))
+spin.to_latex()    # => \begin{pmatrix} 0 \\ 1 \end{pmatrix}
+
+# Complex dtype is preserved
+Sy = struct.lin_alg.tensor(np.array([[0, -1j], [1j, 0]], dtype=complex))
+Sy.to_latex()      # => \begin{pmatrix} 0 & -i \\ i & 0 \end{pmatrix}
+```
+
 #### Concrete Values
 
 Set all elements at once from a numpy array using `.value` or `.bind(array)`:
 
 ```python
-import numpy as np
-
 spin = struct.lin_alg.tensor(shape=(2,1))
 spin.value = np.array([[0], [1]])           # set via property
 # or
@@ -2525,6 +2538,25 @@ w[1][1] = y ** 3
 
 z = x @ w          # symbolic matmul — each element is an Expression
 z.bind(y=2).evaluate()   # evaluate to numpy array
+```
+
+#### Transpose and Index Permutation
+
+`.T` reverses axes (standard matrix transpose). `.transpose(*axes)` supports arbitrary axis permutation for higher-rank tensors:
+
+```python
+A = struct.lin_alg.tensor(np.array([[1, 2, 3], [4, 5, 6]]))
+A.T.to_latex()     # (2,3) -> (3,2) transposed matrix
+
+# Symbolic transpose
+M = struct.lin_alg.tensor(shape=(2,2))
+M[0][0] = y ** 2
+M[0][1] = y + 1
+M.T.to_latex()     # swaps (0,1) and (1,0) elements
+
+# Generalized axis permutation for rank-3+ tensors
+T = struct.lin_alg.tensor(shape=(2, 3, 4))
+T.transpose(2, 0, 1)   # (2,3,4) -> (4,2,3)
 ```
 
 #### Evaluation and Rendering
@@ -2591,7 +2623,43 @@ y = struct.lin_alg.scalar(name="y")
 | `fxn.sinh(expr)` | Hyperbolic sine | `\sinh\left(\cdot\right)` |
 | `fxn.cosh(expr)` | Hyperbolic cosine | `\cosh\left(\cdot\right)` |
 | `fxn.tanh(expr)` | Hyperbolic tangent | `\tanh\left(\cdot\right)` |
+| `fxn.factorial(expr)` | Factorial | `n!` |
+| `fxn.comb(n, k)` | Binomial coefficient C(n,k) | `\binom{n}{k}` |
 | `fxn.krok_delta(a, b)` | Kronecker delta (1 if a==b, else 0) | `\delta_{a\,b}` |
+
+#### Constants
+
+| Constant | Value |
+|----------|-------|
+| `fxn.pi` | `3.141592653589793` (math.pi) |
+
+#### Special Functions
+
+Higher-order functions built from fxn primitives. Integer parameters (`n`, `l`, `m`, `k`) determine the polynomial structure; continuous parameters (`x`, `r`, `theta`, `phi`) can be symbolic:
+
+| Function | Description |
+|----------|-------------|
+| `fxn.assoc_laguerre(n, k, x)` | Associated Laguerre polynomial L_n^k(x) |
+| `fxn.assoc_legendre(l, m, x)` | Associated Legendre polynomial P_l^m(x) (Condon-Shortley phase) |
+| `fxn.spherical_harmonic(l, m, theta, phi)` | Complex spherical harmonic Y_l^m(θ, φ) |
+| `fxn.radial(n, l, Z, r, a0)` | Hydrogen-like radial wavefunction R_{nl}(r) |
+
+```python
+from cm.math.struct.lin_alg import fxn
+
+r = struct.lin_alg.scalar("r")
+a0 = struct.lin_alg.scalar("a0")
+Z = struct.lin_alg.scalar("Z")
+
+# Hydrogen 1s radial wavefunction
+R10 = fxn.radial(1, 0, Z, r, a0)
+R10.bind(Z=1, a0=1, r=1.0).evaluate()   # => 0.7358...
+
+# Spherical harmonic Y_1^0
+theta = struct.lin_alg.scalar("theta")
+phi = struct.lin_alg.scalar("phi")
+Y10 = fxn.spherical_harmonic(1, 0, theta, phi)
+```
 
 #### Usage with Expressions
 
@@ -2665,6 +2733,32 @@ result.bind(y=2.0).evaluate()
 ```
 
 When an operator has a scalar part (e.g., `op.derivative(y) + y**2`), applying it to `f` produces `f' + y²·f`.
+
+#### Custom Operators
+
+You can build custom operators by providing any function that transforms an `Expression` into another `Expression`:
+
+```python
+from cm.math.operator import OperatorExpr
+from cm.math.struct.lin_alg import LINEAR_ALGEBRA
+
+# Custom operator: squares and adds original
+def my_transform(expr):
+    return expr ** 2 + expr
+
+my_op = OperatorExpr(apply_fn=my_transform, structure=LINEAR_ALGEBRA)
+my_op.apply(y)  # → y² + y
+```
+
+`OperatorExpr(apply_fn, structure, var=None, order=1)`:
+- `apply_fn` — callable `(Expression) -> Expression` defining the operator action
+- `structure` — algebraic structure (e.g. `LINEAR_ALGEBRA`)
+- `var`, `order` — optional metadata (used by `op.derivative`)
+
+Custom operators support the same algebra as built-in ones:
+- `op + scalar_expr` → `(O + c)(f) = O(f) + c·f`
+- `scalar * op` → `(c·O)(f) = c·O(f)`
+- Placement in `SymbolicTensor` elements for matmul composition
 
 #### Supported Differentiation Rules
 

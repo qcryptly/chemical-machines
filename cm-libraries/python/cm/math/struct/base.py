@@ -30,7 +30,7 @@ def _resolve_kwargs(kwargs, stack_offset=2):
 
     When a user writes ``expr.bind(x=value)``, Python passes ``{"x": value}``.
     If the caller has a local variable ``x`` that is a ``Var``, we use its
-    ``var_name`` (which may be an auto-generated name like ``T_1``) as the
+    ``name`` (which may be an auto-generated name like ``T_1``) as the
     binding key instead of the literal string ``"x"``.
     """
     frame = inspect.currentframe()
@@ -46,7 +46,7 @@ def _resolve_kwargs(kwargs, stack_offset=2):
     for key, val in kwargs.items():
         caller_var = caller_locals.get(key)
         if isinstance(caller_var, Var):
-            resolved[caller_var.var_name] = val
+            resolved[caller_var.name] = val
         else:
             resolved[key] = val
     return resolved
@@ -154,7 +154,7 @@ class Expression:
         if bindings_dict is not None:
             for key, val in bindings_dict.items():
                 if isinstance(key, Var):
-                    self._bindings[key.var_name] = val
+                    self._bindings[key.name] = val
                 else:
                     self._bindings[key] = val
         self._bindings.update(_resolve_kwargs(kwargs))
@@ -172,7 +172,7 @@ class Expression:
         if bindings_dict is not None:
             for key, val in bindings_dict.items():
                 if isinstance(key, Var):
-                    merged[key.var_name] = val
+                    merged[key.name] = val
                 else:
                     merged[key] = val
         merged.update(_resolve_kwargs(kwargs))
@@ -240,6 +240,14 @@ class Expression:
         for child in self.children:
             result |= child._get_free_variables()
         return result
+
+    def free_vars(self):
+        """Return all free Var nodes in this expression as a sorted tuple."""
+        return tuple(sorted(self._get_free_variables(), key=lambda v: v.name))
+
+    def var_map(self):
+        """Return a dict mapping var name -> Var for all free variables."""
+        return {v.name: v for v in self.free_vars()}
 
     # ---- Operator overloading ----
 
@@ -314,12 +322,12 @@ class Expression:
         cartesian-product iteration returning a list of IndexResult.
 
         Two forms:
-            z.bind_indices(i=0, j=index.range(0,2))   # kwargs (names must match index var_names)
+            z.bind_indices(i=0, j=index.range(0,2))   # kwargs (names must match index names)
             z.bind_indices({i: 0, j: index.range(0,2)}) # dict (keys are index objects)
         """
         if index_map is not None:
             for idx_obj, val in index_map.items():
-                self._index_bindings[idx_obj.var_name] = val
+                self._index_bindings[idx_obj.name] = val
         for k, v in kwargs.items():
             self._index_bindings[k] = v
 
@@ -403,10 +411,10 @@ class Var(Expression):
 
     _var_counter: int = 0
 
-    def __init__(self, var_name, structure, value=None, shape=None, dtype=None,
+    def __init__(self, name, structure, value=None, shape=None, dtype=None,
                  is_tensor=False):
         var_op = Operation("var", arity=0)
-        metadata = {'name': var_name}
+        metadata = {'name': name}
         if shape is not None:
             metadata['shape'] = shape
         if dtype is not None:
@@ -415,7 +423,6 @@ class Var(Expression):
 
         super().__init__(op=var_op, children=[], structure=structure,
                          metadata=metadata)
-        self.var_name = var_name
         self.value = value
 
     def _get_free_variables(self):
@@ -461,13 +468,13 @@ class Var(Expression):
 
     def _substitute(self, bindings):
         """If this var is in bindings, return a concrete copy."""
-        if self.var_name in bindings:
+        if self.name in bindings:
             np = _get_np()
-            val = bindings[self.var_name]
+            val = bindings[self.name]
             if not isinstance(val, np.ndarray):
                 val = np.asarray(val)
             return Var(
-                self.var_name, self.structure,
+                self.name, self.structure,
                 value=val,
                 shape=tuple(val.shape),
                 dtype=self.metadata.get('dtype'),
@@ -477,14 +484,14 @@ class Var(Expression):
 
     def __eq__(self, other):
         if isinstance(other, Var):
-            return self.var_name == other.var_name
+            return self.name == other.name
         return False
 
     def __hash__(self):
-        return hash(('Var', self.var_name))
+        return hash(('Var', self.name))
 
     def __repr__(self):
-        return f"Var({self.var_name!r})"
+        return f"Var({self.name!r})"
 
 
 class ScalarExpr(Expression):
@@ -523,9 +530,69 @@ def _ensure_expression(value, structure):
     raise TypeError(f"Cannot convert {type(value).__name__} to Expression")
 
 
+def _is_scalar(expr, value):
+    """Check if expr is a ScalarExpr with the given numeric value."""
+    return isinstance(expr, ScalarExpr) and expr.scalar_value == value
+
+
 def _make_binop(op_name, left, right):
-    """Create a binary operation Expression."""
+    """Create a binary operation Expression with algebraic simplification."""
     structure = left.structure
+
+    # Constant folding: both operands are ScalarExpr
+    if isinstance(left, ScalarExpr) and isinstance(right, ScalarExpr):
+        a, b = left.scalar_value, right.scalar_value
+        try:
+            if op_name == "add":
+                return ScalarExpr(a + b, structure)
+            if op_name == "sub":
+                return ScalarExpr(a - b, structure)
+            if op_name == "mul":
+                return ScalarExpr(a * b, structure)
+            if op_name == "div" and b != 0:
+                return ScalarExpr(a / b, structure)
+            if op_name == "pow":
+                return ScalarExpr(a ** b, structure)
+        except (ArithmeticError, ValueError):
+            pass  # fall through to normal construction
+
+    # Identity simplifications
+    if op_name == "add":
+        if _is_scalar(left, 0):
+            return right
+        if _is_scalar(right, 0):
+            return left
+
+    elif op_name == "sub":
+        if _is_scalar(right, 0):
+            return left
+        if _is_scalar(left, 0):
+            return _make_unaryop("neg", right)
+
+    elif op_name == "mul":
+        if _is_scalar(left, 0) or _is_scalar(right, 0):
+            return ScalarExpr(0, structure)
+        if _is_scalar(left, 1):
+            return right
+        if _is_scalar(right, 1):
+            return left
+        if _is_scalar(left, -1):
+            return _make_unaryop("neg", right)
+        if _is_scalar(right, -1):
+            return _make_unaryop("neg", left)
+
+    elif op_name == "div":
+        if _is_scalar(left, 0):
+            return ScalarExpr(0, structure)
+        if _is_scalar(right, 1):
+            return left
+
+    elif op_name == "pow":
+        if _is_scalar(right, 0):
+            return ScalarExpr(1, structure)
+        if _is_scalar(right, 1):
+            return left
+
     op = structure.get_op(op_name)
     metadata = {}
     if op.result_shape_fn:
@@ -534,8 +601,19 @@ def _make_binop(op_name, left, right):
 
 
 def _make_unaryop(op_name, operand):
-    """Create a unary operation Expression."""
+    """Create a unary operation Expression with algebraic simplification."""
     structure = operand.structure
+
+    if op_name == "neg":
+        if _is_scalar(operand, 0):
+            return ScalarExpr(0, structure)
+        if isinstance(operand, ScalarExpr):
+            return ScalarExpr(-operand.scalar_value, structure)
+        # double negation: -(-(x)) → x
+        if (isinstance(operand, Expression) and operand.op.name == "neg"
+                and operand.children):
+            return operand.children[0]
+
     op = structure.get_op(op_name)
     metadata = {}
     if op.result_shape_fn:

@@ -22,7 +22,7 @@ def differentiate(expr, var):
     """
     # Leaf: Var
     if isinstance(expr, Var):
-        if expr.var_name == var.var_name:
+        if expr.name == var.name:
             return ScalarExpr(1, expr.structure)
         return ScalarExpr(0, expr.structure)
 

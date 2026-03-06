@@ -40,15 +40,34 @@ def tensor(shape=None, dtype=None, name=None, value=None):
     Create a tensor expression in the linear algebra structure.
 
     Args:
-        shape: Tensor shape tuple, e.g. (3,3). None for lazy/abstract.
+        shape: Tensor shape tuple, e.g. (3,3). Can also pass a numpy array
+               or nested list as the first arg for immediate value binding.
         dtype: A cm.math.numbers Dtype (e.g. numbers.float64).
         name: Variable name for LaTeX rendering. Auto-generated if None.
         value: Concrete numpy array or scalar. If provided, tensor is eager.
 
     Returns:
-        A SymbolicTensor if shape is given with no value (supports element
-        assignment), or a Var if a concrete value is provided.
+        A SymbolicTensor with concrete values if an array is passed as
+        shape or value; otherwise a SymbolicTensor for element assignment,
+        or a Var if a concrete value is provided with no shape.
     """
+    # Detect array-like first arg: treat as immediate value binding
+    if shape is not None and not isinstance(shape, tuple):
+        arr = np.asarray(shape)
+        if arr.ndim > 0:
+            if name is None:
+                Var._var_counter += 1
+                name = f"T_{Var._var_counter}"
+            from ...tensor import SymbolicTensor
+            st = SymbolicTensor(
+                shape=tuple(arr.shape),
+                structure=LINEAR_ALGEBRA,
+                name=name,
+                dtype=dtype,
+            )
+            st.value = arr
+            return st
+
     if name is None:
         Var._var_counter += 1
         name = f"T_{Var._var_counter}"
@@ -63,6 +82,20 @@ def tensor(shape=None, dtype=None, name=None, value=None):
             dtype=dtype,
         )
 
+    # value kwarg with array-like: return SymbolicTensor with concrete values
+    if value is not None:
+        arr = np.asarray(value)
+        if arr.ndim > 0:
+            from ...tensor import SymbolicTensor
+            st = SymbolicTensor(
+                shape=tuple(arr.shape),
+                structure=LINEAR_ALGEBRA,
+                name=name,
+                dtype=dtype,
+            )
+            st.value = arr
+            return st
+
     actual_shape = shape
     if value is not None and actual_shape is None:
         if hasattr(value, 'shape'):
@@ -75,7 +108,7 @@ def tensor(shape=None, dtype=None, name=None, value=None):
         value = np.asarray(value, dtype=np_dtype)
 
     return Var(
-        var_name=name,
+        name=name,
         structure=LINEAR_ALGEBRA,
         value=value,
         shape=actual_shape,
@@ -116,7 +149,7 @@ def scalar(value=None, dtype=None, name=None):
         Var._var_counter += 1
         name = f"s_{Var._var_counter}"
     return Var(
-        var_name=name,
+        name=name,
         structure=LINEAR_ALGEBRA,
         value=value,
         shape=(),
@@ -144,7 +177,7 @@ def diff(expr, vars=None, order=1):
     # Handle scalar Expression input
     if isinstance(expr, Expression):
         if vars is None:
-            vars = tuple(sorted(expr._get_free_variables(), key=lambda v: v.var_name))
+            vars = tuple(sorted(expr._get_free_variables(), key=lambda v: v.name))
         n = len(vars)
         out_shape = (n,) * order
         result = SymbolicTensor(shape=out_shape, structure=LINEAR_ALGEBRA)

@@ -85,7 +85,7 @@ class OperatorExpr:
         return self.__mul__(other)
 
     def __repr__(self):
-        var_name = self._var.var_name if self._var else "?"
+        var_name = self._var.name if self._var else "?"
         parts = [f"d/d{var_name}"]
         if self._order > 1:
             parts = [f"d^{self._order}/d{var_name}^{self._order}"]

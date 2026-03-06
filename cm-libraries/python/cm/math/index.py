@@ -101,7 +101,7 @@ class BoundIndexExpression:
         if bindings_dict is not None:
             for key, val in bindings_dict.items():
                 if isinstance(key, Var):
-                    resolved_kwargs[key.var_name] = val
+                    resolved_kwargs[key.name] = val
                 else:
                     resolved_kwargs[key] = val
         resolved_kwargs.update(kwargs)
@@ -216,9 +216,9 @@ class IndexedExpression(Expression):
         new_indices = []
         for idx in self.indices:
             if (isinstance(idx, Var) and idx.metadata.get('is_index')
-                    and idx.var_name in kwargs):
+                    and idx.name in kwargs):
                 new_indices.append(
-                    ScalarExpr(kwargs[idx.var_name], self.structure)
+                    ScalarExpr(kwargs[idx.name], self.structure)
                 )
             else:
                 new_indices.append(idx)
@@ -232,13 +232,13 @@ class IndexedExpression(Expression):
         return _make_index_access(new_base, new_indices)
 
     def __repr__(self):
-        base_name = getattr(self.base, 'var_name', str(self.base))
+        base_name = getattr(self.base, 'name', str(self.base))
         idx_strs = []
         for idx in self.indices:
             if isinstance(idx, ScalarExpr):
                 idx_strs.append(str(idx.scalar_value))
             elif isinstance(idx, Var):
-                idx_strs.append(idx.var_name)
+                idx_strs.append(idx.name)
             else:
                 idx_strs.append(repr(idx))
         return f"{base_name}[{', '.join(idx_strs)}]"
@@ -269,7 +269,7 @@ class index(Var):
         from .struct.lin_alg import LINEAR_ALGEBRA
 
         super().__init__(
-            var_name=name,
+            name=name,
             structure=LINEAR_ALGEBRA,
             value=None,
             shape=(),
@@ -287,7 +287,7 @@ class index(Var):
         return {self}
 
     def __repr__(self):
-        return f"index({self.var_name!r})"
+        return f"index({self.name!r})"
 
 
 # ---- Helper for Expression.__getitem__ ----

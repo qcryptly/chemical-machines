@@ -79,7 +79,13 @@ class SymbolicTensor:
     def value(self):
         """Get concrete numpy array if all elements are ScalarExpr, else None."""
         import numpy as np
-        result = np.empty(self._shape, dtype=np.float64)
+        # Determine dtype from first element
+        dt = np.float64
+        for expr in self._elements.values():
+            if isinstance(expr, ScalarExpr) and isinstance(expr.scalar_value, complex):
+                dt = np.complex128
+                break
+        result = np.empty(self._shape, dtype=dt)
         for idx in _iter_indices(self._shape):
             expr = self._elements.get(idx, ScalarExpr(0, self._structure))
             if isinstance(expr, ScalarExpr):
@@ -95,8 +101,9 @@ class SymbolicTensor:
         arr = np.asarray(arr)
         if arr.shape != self._shape:
             raise ValueError(f"Shape mismatch: expected {self._shape}, got {arr.shape}")
+        coerce = complex if np.issubdtype(arr.dtype, np.complexfloating) else float
         for idx in _iter_indices(self._shape):
-            self._elements[idx] = ScalarExpr(float(arr[idx]), self._structure)
+            self._elements[idx] = ScalarExpr(coerce(arr[idx]), self._structure)
         self._is_composite = True
 
     @property
@@ -200,12 +207,57 @@ class SymbolicTensor:
             result = result + self._get_element(i, i)
         return result
 
+    def transpose(self, *axes):
+        """Permute tensor indices.
+
+        With no args: reverses all axes (standard transpose for 2D).
+        With a permutation tuple: reorders axes accordingly.
+
+        Examples:
+            A.transpose()       # (m, n) -> (n, m)
+            A.transpose(1, 0)   # same as above
+            T.transpose(2, 0, 1) # (a, b, c) -> (c, a, b)
+
+        Returns a new SymbolicTensor with permuted shape and elements.
+        """
+        ndim = len(self._shape)
+        if not axes:
+            perm = tuple(reversed(range(ndim)))
+        elif len(axes) == 1 and isinstance(axes[0], (tuple, list)):
+            perm = tuple(axes[0])
+        else:
+            perm = tuple(axes)
+        if sorted(perm) != list(range(ndim)):
+            raise ValueError(
+                f"Invalid axis permutation {perm} for {ndim}D tensor"
+            )
+        new_shape = tuple(self._shape[p] for p in perm)
+        result = SymbolicTensor(
+            shape=new_shape, structure=self._structure, name=self._name,
+            dtype=self._dtype,
+        )
+        for old_idx, expr in self._elements.items():
+            new_idx = tuple(old_idx[p] for p in perm)
+            result._elements[new_idx] = expr
+        result._is_composite = self._is_composite
+        result._bindings = dict(self._bindings)
+        return result
+
+    @property
+    def T(self):
+        """Transpose (reverses axes). Shorthand for .transpose()."""
+        return self.transpose()
+
     def free_vars(self):
         """Return all free Var nodes across element expressions as a sorted tuple."""
         all_vars = set()
         for expr in self._elements.values():
             all_vars |= expr._get_free_variables()
-        return tuple(sorted(all_vars, key=lambda v: v.var_name))
+        return tuple(sorted(all_vars, key=lambda v: v.name))
+
+    def var_map(self):
+        """Return a dict mapping var name -> Var for all free variables."""
+        return {v.name: v for v in self.free_vars()}
 
     def __matmul__(self, other):
         """Symbolic matrix multiplication."""
@@ -269,7 +321,7 @@ class SymbolicTensor:
             if isinstance(value_or_dict, dict):
                 for key, val in value_or_dict.items():
                     if isinstance(key, Var):
-                        self._bindings[key.var_name] = val
+                        self._bindings[key.name] = val
                     else:
                         self._bindings[key] = val
             elif isinstance(value_or_dict, (np.ndarray, list, tuple)):
@@ -291,7 +343,7 @@ class SymbolicTensor:
             self._bindings.clear()
         else:
             for v in vars:
-                name = v.var_name if isinstance(v, Var) else str(v)
+                name = v.name if isinstance(v, Var) else str(v)
                 self._bindings.pop(name, None)
         return self
 
@@ -304,7 +356,7 @@ class SymbolicTensor:
         if bindings_dict is not None:
             for key, val in bindings_dict.items():
                 if isinstance(key, Var):
-                    merged[key.var_name] = val
+                    merged[key.name] = val
                 else:
                     merged[key] = val
         merged.update(_resolve_kwargs(kwargs))

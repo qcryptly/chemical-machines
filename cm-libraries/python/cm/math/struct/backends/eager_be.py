@@ -44,7 +44,7 @@ class EagerBackend:
         if isinstance(expr, Var):
             if expr.value is not None:
                 return expr.value
-            name = expr.var_name
+            name = expr.name
             if name in bindings:
                 val = bindings[name]
                 if hasattr(val, 'detach'):

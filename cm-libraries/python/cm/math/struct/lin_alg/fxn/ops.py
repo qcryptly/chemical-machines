@@ -3,7 +3,9 @@ Elementary mathematical function operations and backend registrations.
 
 Operations: sin, cos, tan, exp, log, sqrt, abs,
             asin, acos, atan, sinh, cosh, tanh,
-            krok_delta
+            factorial, comb, krok_delta
+
+Constants:  pi
 """
 
 from __future__ import annotations
@@ -26,6 +28,8 @@ _atan_op = Operation("atan", arity=1, latex_name="arctan")
 _sinh_op = Operation("sinh", arity=1, latex_name="sinh")
 _cosh_op = Operation("cosh", arity=1, latex_name="cosh")
 _tanh_op = Operation("tanh", arity=1, latex_name="tanh")
+_factorial_op = Operation("factorial", arity=1, latex_name="factorial")
+_comb_op = Operation("comb", arity=2, latex_name="binom")
 _krok_delta_op = Operation("krok_delta", arity=2, latex_name="delta")
 
 
@@ -95,6 +99,37 @@ def tanh(expr):
     return _make_fxn(_tanh_op, expr)
 
 
+def factorial(expr):
+    """Factorial function."""
+    if isinstance(expr, _numbers.Number):
+        import math
+        return math.factorial(int(expr))
+    return _make_fxn(_factorial_op, expr)
+
+
+def comb(n, k):
+    """Binomial coefficient C(n, k) = n! / (k! (n-k)!)."""
+    if isinstance(n, _numbers.Number) and isinstance(k, _numbers.Number):
+        import math
+        return math.comb(int(n), int(k))
+    if not isinstance(n, Expression):
+        n = _ensure_expression(n, None)
+    if not isinstance(k, Expression):
+        k = _ensure_expression(k, n.structure)
+    return Expression(
+        op=_comb_op,
+        children=[n, k],
+        structure=n.structure,
+        metadata={'shape': (), 'is_scalar': True},
+    )
+
+
+# ---- Constants ----
+
+import math as _math_module
+pi = _math_module.pi
+
+
 def krok_delta(a, b):
     """Kronecker delta: delta(a, b) = 1 if a == b, else 0."""
     if isinstance(a, _numbers.Number) and isinstance(b, _numbers.Number):
@@ -138,6 +173,9 @@ def _register_eager():
     eager_backend.register(S, "sinh", lambda a: np.sinh(a))
     eager_backend.register(S, "cosh", lambda a: np.cosh(a))
     eager_backend.register(S, "tanh", lambda a: np.tanh(a))
+    import math as _math
+    eager_backend.register(S, "factorial", lambda a: float(_math.factorial(int(a))))
+    eager_backend.register(S, "comb", lambda a, b: float(_math.comb(int(a), int(b))))
     eager_backend.register(S, "krok_delta",
         lambda a, b: np.float64(1.0) if np.array_equal(np.asarray(a), np.asarray(b)) else np.float64(0.0))
 
@@ -166,6 +204,21 @@ def _register_torch():
     torch_backend.register(S, "sinh", _make_torch("sinh"))
     torch_backend.register(S, "cosh", _make_torch("cosh"))
     torch_backend.register(S, "tanh", _make_torch("tanh"))
+
+    def _torch_factorial(a):
+        import torch
+        return torch.exp(torch.lgamma(a + 1))
+
+    torch_backend.register(S, "factorial", _torch_factorial)
+
+    def _torch_comb(a, b):
+        import torch
+        # C(n,k) = gamma(n+1) / (gamma(k+1) * gamma(n-k+1))
+        return torch.exp(
+            torch.lgamma(a + 1) - torch.lgamma(b + 1) - torch.lgamma(a - b + 1)
+        )
+
+    torch_backend.register(S, "comb", _torch_comb)
 
     def _torch_krok_delta(a, b):
         import torch
@@ -199,6 +252,10 @@ def _register_latex():
     latex_backend.register(S, "sinh", _make_latex("sinh"))
     latex_backend.register(S, "cosh", _make_latex("cosh"))
     latex_backend.register(S, "tanh", _make_latex("tanh"))
+    latex_backend.register(S, "factorial",
+        lambda child, **kw: rf"{child}!")
+    latex_backend.register(S, "comb",
+        lambda child_n, child_k, **kw: rf"\binom{{{child_n}}}{{{child_k}}}")
     latex_backend.register(S, "krok_delta",
         lambda child_a, child_b, **kw: rf"\delta_{{{child_a} {child_b}}}")
 

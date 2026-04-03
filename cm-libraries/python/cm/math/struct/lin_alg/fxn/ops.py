@@ -32,12 +32,20 @@ _factorial_op = Operation("factorial", arity=1, latex_name="factorial")
 _comb_op = Operation("comb", arity=2, latex_name="binom")
 _krok_delta_op = Operation("krok_delta", arity=2, latex_name="delta")
 
+def is_expression(value):
+    for _ in list(type(value).__bases__):
+        if "expression" in _.__name__.lower():
+            return True
+    if "expression" in type(value).__name__.lower():
+        return True
+    return False
 
 # ---- Factory functions ----
 
 def _make_fxn(op, expr):
-    if not isinstance(expr, Expression):
+    if not is_expression(expr):
         expr = _ensure_expression(expr, None)
+
     return Expression(
         op=op,
         children=[expr],

@@ -518,8 +518,13 @@ class ScalarExpr(Expression):
 
 def _ensure_expression(value, structure):
     """Convert scalars/arrays to Expression, pass through Expressions."""
-    if isinstance(value, Expression):
+    for _ in list(type(value).__bases__):
+        if "expression" in _.__name__.lower():
+            return value
+        
+    if "expression" in type(value).__name__.lower():
         return value
+
     if isinstance(value, (int, float, complex)):
         return ScalarExpr(value, structure)
     np = _get_np()

@@ -7,8 +7,25 @@ Registry maps (structure_name, op_name) -> renderer callable.
 
 from __future__ import annotations
 from typing import Dict, Tuple, Callable
+from ..base import Expression
 
 __all__ = ['LatexBackend', 'latex_backend']
+
+_GREEK_MAP = {
+    'alpha': r'\alpha', 'beta': r'\beta', 'gamma': r'\gamma',
+    'delta': r'\delta', 'epsilon': r'\epsilon', 'varepsilon': r'\varepsilon',
+    'zeta': r'\zeta', 'eta': r'\eta', 'theta': r'\theta',
+    'vartheta': r'\vartheta', 'iota': r'\iota', 'kappa': r'\kappa',
+    'lambda': r'\lambda', 'mu': r'\mu', 'nu': r'\nu',
+    'xi': r'\xi', 'pi': r'\pi', 'rho': r'\rho',
+    'sigma': r'\sigma', 'tau': r'\tau', 'tao': r'\tau',
+    'upsilon': r'\upsilon', 'phi': r'\phi', 'varphi': r'\varphi',
+    'chi': r'\chi', 'psi': r'\psi', 'omega': r'\omega',
+    'Gamma': r'\Gamma', 'Delta': r'\Delta', 'Theta': r'\Theta',
+    'Lambda': r'\Lambda', 'Xi': r'\Xi', 'Pi': r'\Pi',
+    'Sigma': r'\Sigma', 'Upsilon': r'\Upsilon', 'Phi': r'\Phi',
+    'Psi': r'\Psi', 'Omega': r'\Omega',
+}
 
 # Precedence for parenthesization (higher = binds tighter)
 _PRECEDENCE = {
@@ -27,14 +44,13 @@ class LatexBackend:
 
     def register(self, structure, op, renderer):
         self._registry[(structure, op)] = renderer
-
+        
     def render(self, expr, **options):
-        from ..base import Var, ScalarExpr
-
-        if isinstance(expr, Var):
+        # Use op.name instead of isinstance to avoid module-identity issues
+        if expr.op.name == "var":
             return _render_var(expr)
 
-        if isinstance(expr, ScalarExpr):
+        if expr.op.name == "scalar":
             return _render_scalar(expr)
 
         # Registered renderer
@@ -69,14 +85,13 @@ class LatexBackend:
             return f"{left} - {right}"
 
         if op == "mul" and len(ch) == 2:
-            from ..base import ScalarExpr, Var
             prec = _PRECEDENCE['mul']
             left = self._wrap_if_lower(ch[0], prec)
             right = self._wrap_if_lower(ch[1], prec)
-            # Smart mul: omit \cdot for scalar * tensor/var patterns
-            if isinstance(ch[0], ScalarExpr):
-                return f"{left} {right}"
-            return rf"{left} \cdot {right}"
+            # Use \cdot only between two numeric constants; otherwise juxtapose
+            if ch[0].op.name == "scalar" and ch[1].op.name == "scalar":
+                return rf"{left} \cdot {right}"
+            return f"{left} {right}"
 
         if op == "div" and len(ch) == 2:
             return rf"\frac{{{self.render(ch[0])}}}{{{self.render(ch[1])}}}"
@@ -101,16 +116,15 @@ class LatexBackend:
 
 def _render_var(var):
     """Render a Var to LaTeX. Replicates cm.symbols Var.to_latex() exactly."""
-    from ..base import Var
     # If the Var has a concrete value (e.g. after substitute), render the value
-    if var.value is not None:
+    if getattr(var, 'value', None) is not None:
         return _render_scalar_value(var.value)
     name = var.name
     is_tensor = var.metadata.get('is_tensor', False)
 
     # Check for Greek letters
-    if name in Var._GREEK_MAP:
-        base = Var._GREEK_MAP[name]
+    if name in _GREEK_MAP:
+        base = _GREEK_MAP[name]
         if is_tensor:
             return rf"\boldsymbol{{{base}}}"
         return base
@@ -120,8 +134,8 @@ def _render_var(var):
         parts = name.split('_', 1)
         base = parts[0]
         subscript = parts[1]
-        if base in Var._GREEK_MAP:
-            base = Var._GREEK_MAP[base]
+        if base in _GREEK_MAP:
+            base = _GREEK_MAP[base]
         elif is_tensor:
             base = rf"\mathbf{{{base}}}"
         if len(subscript) > 1:

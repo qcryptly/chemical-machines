@@ -36,13 +36,12 @@ class EagerBackend:
         self._registry[(structure, op)] = impl
 
     def evaluate(self, expr, bindings=None):
-        from ..base import Var, ScalarExpr
         bindings = bindings or {}
         np = _get_np()
 
-        # Leaf: Var
-        if isinstance(expr, Var):
-            if expr.value is not None:
+        # Leaf: Var (use op.name to avoid module-identity issues)
+        if expr.op.name == "var":
+            if getattr(expr, 'value', None) is not None:
                 return expr.value
             name = expr.name
             if name in bindings:
@@ -56,7 +55,7 @@ class EagerBackend:
             )
 
         # Leaf: ScalarExpr
-        if isinstance(expr, ScalarExpr):
+        if expr.op.name == "scalar":
             return expr.scalar_value
 
         # Recursive: evaluate children

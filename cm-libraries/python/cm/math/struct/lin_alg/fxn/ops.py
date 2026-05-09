@@ -10,7 +10,7 @@ Constants:  pi
 
 from __future__ import annotations
 import numbers as _numbers
-from ...base import Expression, ScalarExpr, Operation, _ensure_expression
+from ...base import Expression, ScalarExpr, Operation, is_expression, ensure_expression
 
 
 # ---- Operation definitions ----
@@ -32,19 +32,11 @@ _factorial_op = Operation("factorial", arity=1, latex_name="factorial")
 _comb_op = Operation("comb", arity=2, latex_name="binom")
 _krok_delta_op = Operation("krok_delta", arity=2, latex_name="delta")
 
-def is_expression(value):
-    for _ in list(type(value).__bases__):
-        if "expression" in _.__name__.lower():
-            return True
-    if "expression" in type(value).__name__.lower():
-        return True
-    return False
-
 # ---- Factory functions ----
 
 def _make_fxn(op, expr):
     if not is_expression(expr):
-        expr = _ensure_expression(expr, None)
+        expr = ensure_expression(expr, None)
 
     return Expression(
         op=op,
@@ -121,9 +113,9 @@ def comb(n, k):
         import math
         return math.comb(int(n), int(k))
     if not isinstance(n, Expression):
-        n = _ensure_expression(n, None)
+        n = ensure_expression(n, None)
     if not isinstance(k, Expression):
-        k = _ensure_expression(k, n.structure)
+        k = ensure_expression(k, n.structure)
     return Expression(
         op=_comb_op,
         children=[n, k],
@@ -143,9 +135,9 @@ def krok_delta(a, b):
     if isinstance(a, _numbers.Number) and isinstance(b, _numbers.Number):
         return 1.0 if a == b else 0.0
     if not isinstance(a, Expression):
-        a = _ensure_expression(a, None)
+        a = ensure_expression(a, None)
     if not isinstance(b, Expression):
-        b = _ensure_expression(b, a.structure)
+        b = ensure_expression(b, a.structure)
     return Expression(
         op=_krok_delta_op,
         children=[a, b],

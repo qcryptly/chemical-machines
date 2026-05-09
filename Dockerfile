@@ -46,7 +46,7 @@ RUN pip install --no-cache-dir \
     jedi \
     biopython rdkit openmm mdanalysis \
     psycopg2-binary elasticsearch \
-    pybind11
+    pybind11 torch torchvision torchaudio
 # PyTorch installed at runtime via init-base-env.sh for CUDA detection
 
 # Install Node.js

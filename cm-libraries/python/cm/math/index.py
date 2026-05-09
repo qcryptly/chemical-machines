@@ -22,7 +22,7 @@ import math
 from typing import Optional, Dict, Any, List
 
 from .struct.base import (
-    Expression, Var, ScalarExpr, Operation, _ensure_expression,
+    Expression, Var, ScalarExpr, Operation, ensure_expression,
 )
 
 __all__ = [
@@ -330,7 +330,7 @@ def _make_index_access(tensor_expr, indices_tuple):
         elif isinstance(idx, (int, float)):
             normalized.append(ScalarExpr(idx, tensor_expr.structure))
         else:
-            normalized.append(_ensure_expression(idx, tensor_expr.structure))
+            normalized.append(ensure_expression(idx, tensor_expr.structure))
 
     # Compute result shape
     n_indices = len(normalized)

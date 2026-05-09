@@ -252,53 +252,53 @@ class Expression:
     # ---- Operator overloading ----
 
     def __eq__ (self, other):
-        other = _ensure_expression(other, self.structure)
+        other = ensure_expression(other, self.structure)
         return _make_binop("eq", self, other)
 
     def __add__(self, other):
-        other = _ensure_expression(other, self.structure)
+        other = ensure_expression(other, self.structure)
         return _make_binop("add", self, other)
 
     def __radd__(self, other):
-        other = _ensure_expression(other, self.structure)
+        other = ensure_expression(other, self.structure)
         return _make_binop("add", other, self)
 
     def __sub__(self, other):
-        other = _ensure_expression(other, self.structure)
+        other = ensure_expression(other, self.structure)
         return _make_binop("sub", self, other)
 
     def __rsub__(self, other):
-        other = _ensure_expression(other, self.structure)
+        other = ensure_expression(other, self.structure)
         return _make_binop("sub", other, self)
 
     def __mul__(self, other):
         from ..tensor import SymbolicTensor
         if isinstance(other, SymbolicTensor):
             return NotImplemented
-        other = _ensure_expression(other, self.structure)
+        other = ensure_expression(other, self.structure)
         return _make_binop("mul", self, other)
 
     def __rmul__(self, other):
         from ..tensor import SymbolicTensor
         if isinstance(other, SymbolicTensor):
             return NotImplemented
-        other = _ensure_expression(other, self.structure)
+        other = ensure_expression(other, self.structure)
         return _make_binop("mul", other, self)
 
     def __matmul__(self, other):
-        other = _ensure_expression(other, self.structure)
+        other = ensure_expression(other, self.structure)
         return _make_binop("matmul", self, other)
 
     def __truediv__(self, other):
-        other = _ensure_expression(other, self.structure)
+        other = ensure_expression(other, self.structure)
         return _make_binop("div", self, other)
 
     def __rtruediv__(self, other):
-        other = _ensure_expression(other, self.structure)
+        other = ensure_expression(other, self.structure)
         return _make_binop("div", other, self)
 
     def __pow__(self, other):
-        other = _ensure_expression(other, self.structure)
+        other = ensure_expression(other, self.structure)
         return _make_binop("pow", self, other)
 
     def __neg__(self):
@@ -516,17 +516,25 @@ class ScalarExpr(Expression):
 
 # ---- Helper functions ----
 
-def _ensure_expression(value, structure):
+def is_expression(value):
     """Convert scalars/arrays to Expression, pass through Expressions."""
     for _ in list(type(value).__bases__):
         if "expression" in _.__name__.lower():
-            return value
+            return True
         
     if "expression" in type(value).__name__.lower():
+        return True
+    
+    return False
+
+def ensure_expression(value, structure):
+    """Convert scalars/arrays to Expression, pass through Expressions."""
+    if is_expression(value):
         return value
 
     if isinstance(value, (int, float, complex)):
         return ScalarExpr(value, structure)
+
     np = _get_np()
     if isinstance(value, np.ndarray):
         Var._var_counter += 1

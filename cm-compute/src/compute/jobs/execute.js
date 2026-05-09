@@ -148,7 +148,7 @@ async function execute(params, context) {
     ? `try:\n from cm.views.output import clear as _cm_clear; _cm_clear()\nexcept Exception:\n pass\n`
     : '';
   const fullCode = clearPrefix + code;
-
+  console.log("Here is some debugging: ", pythonPath, sourceFullDir)
   return new Promise((resolve, reject) => {
     const python = spawn(pythonPath, ['-c', fullCode], {
       cwd: sourceFullDir,  // Run from the source file's directory

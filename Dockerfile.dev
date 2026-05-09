@@ -80,7 +80,7 @@ RUN pip install --no-cache-dir \
     jedi \
     biopython rdkit openmm mdanalysis \
     psycopg2-binary elasticsearch \
-    pybind11
+    pybind11 torch torchvision torchaudio
 # PyTorch installed at runtime via init-base-env.sh for CUDA detection
 
 # Accept conda channels for PyTorch (used by init-base-env.sh)

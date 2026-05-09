@@ -11,8 +11,8 @@ Functions:
 from __future__ import annotations
 import math as _math
 
-from ...base import Expression, ScalarExpr, _ensure_expression
-from .ops import sin, cos, exp, sqrt
+from ...base import Expression, ScalarExpr, is_expression, ensure_expression
+from .ops import sin, cos, exp, sqrt, fabs
 
 
 def assoc_laguerre(n, k, x):
@@ -29,7 +29,7 @@ def assoc_laguerre(n, k, x):
         Symbolic expression for L_n^k(x).
     """
     if not isinstance(x, Expression):
-        x = _ensure_expression(x, None)
+        x = ensure_expression(x, None)
 
     result = None
     for m in range(n + 1):
@@ -38,7 +38,7 @@ def assoc_laguerre(n, k, x):
         if abs(coeff) < 1e-15:
             continue
         if m == 0:
-            term = _ensure_expression(coeff, x.structure)
+            term = ensure_expression(coeff, x.structure)
         else:
             term = coeff * x**m
         result = term if result is None else result + term
@@ -59,7 +59,7 @@ def assoc_legendre(l, m, x):
         Symbolic expression for P_l^m(x).
     """
     if not isinstance(x, Expression):
-        x = _ensure_expression(x, None)
+        x = ensure_expression(x, None)
 
     abs_m = abs(m)
     if abs_m > l:
@@ -81,7 +81,7 @@ def assoc_legendre(l, m, x):
         if abs(deriv_coeff) < 1e-15:
             continue
         if new_power == 0:
-            term = _ensure_expression(deriv_coeff, x.structure)
+            term = ensure_expression(deriv_coeff, x.structure)
         else:
             term = deriv_coeff * x**new_power
         deriv_sum = term if deriv_sum is None else deriv_sum + term
@@ -130,12 +130,14 @@ def spherical_harmonic(l, m, theta, phi):
     Returns:
         Symbolic expression for Y_l^m (complex-valued when m != 0).
     """
-    if not isinstance(theta, Expression):
-        theta = _ensure_expression(theta, None)
+    if not is_expression(theta, Expression):
+        theta = ensure_expression(theta, )
+    if not is_expression(phi, Expression):
+        phi = ensure_expression(phi, )
     if not isinstance(phi, Expression):
-        phi = _ensure_expression(phi, theta.structure)
+        phi = ensure_expression(phi, theta.structure)
 
-    abs_m = abs(m)
+    abs_m = fabs(m)
 
     # Normalization constant
     norm = _math.sqrt(
@@ -163,7 +165,7 @@ def spherical_harmonic(l, m, theta, phi):
         if abs(deriv_coeff) < 1e-15:
             continue
         if new_power == 0:
-            term = _ensure_expression(deriv_coeff, theta.structure)
+            term = ensure_expression(deriv_coeff, theta.structure)
         else:
             term = deriv_coeff * cos_theta**new_power
         deriv_at_cos = term if deriv_at_cos is None else deriv_at_cos + term
@@ -216,11 +218,11 @@ def radial(n, l, Z, r, a0):
             struct = v.structure
             break
     if not isinstance(r, Expression):
-        r = _ensure_expression(r, struct)
+        r = ensure_expression(r, struct)
     if not isinstance(Z, Expression):
-        Z = _ensure_expression(Z, r.structure)
+        Z = ensure_expression(Z, r.structure)
     if not isinstance(a0, Expression):
-        a0 = _ensure_expression(a0, r.structure)
+        a0 = ensure_expression(a0, r.structure)
 
     # rho = 2Zr / (n * a0)
     rho = (2 * Z * r) / (n * a0)

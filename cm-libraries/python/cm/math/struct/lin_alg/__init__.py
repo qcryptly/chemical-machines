@@ -18,22 +18,11 @@ from __future__ import annotations
 import numpy as np
 
 from ..base import Structure, Signature, Expression, Var, ScalarExpr
-from .ops import register_lin_alg_ops, LIN_ALG_OPS
-from .axioms import LIN_ALG_AXIOMS
+from .ops import register_lin_alg_ops
 
-__all__ = ['tensor', 'vector', 'matrix', 'scalar', 'diff', 'jacobian', 'hessian', 'LINEAR_ALGEBRA']
+from .structure import STRUCTURE_LINEAR_ALGEBRA
 
-# Build the structure
-_signature = Signature()
-for _op in LIN_ALG_OPS:
-    _signature.add(_op)
-
-LINEAR_ALGEBRA = Structure(
-    name="linear_algebra",
-    signature=_signature,
-    axioms=LIN_ALG_AXIOMS,
-)
-
+__all__ = ['tensor', 'vector', 'matrix', 'scalar', 'diff', 'jacobian', 'hessian', 'STRUCTURE_LINEAR_ALGEBRA']
 
 def tensor(shape=None, dtype=None, name=None, value=None):
     """
@@ -61,7 +50,7 @@ def tensor(shape=None, dtype=None, name=None, value=None):
             from ...tensor import SymbolicTensor
             st = SymbolicTensor(
                 shape=tuple(arr.shape),
-                structure=LINEAR_ALGEBRA,
+                structure=STRUCTURE_LINEAR_ALGEBRA,
                 name=name,
                 dtype=dtype,
             )
@@ -77,7 +66,7 @@ def tensor(shape=None, dtype=None, name=None, value=None):
         from ...tensor import SymbolicTensor
         return SymbolicTensor(
             shape=shape,
-            structure=LINEAR_ALGEBRA,
+            structure=STRUCTURE_LINEAR_ALGEBRA,
             name=name,
             dtype=dtype,
         )
@@ -89,7 +78,7 @@ def tensor(shape=None, dtype=None, name=None, value=None):
             from ...tensor import SymbolicTensor
             st = SymbolicTensor(
                 shape=tuple(arr.shape),
-                structure=LINEAR_ALGEBRA,
+                structure=STRUCTURE_LINEAR_ALGEBRA,
                 name=name,
                 dtype=dtype,
             )
@@ -109,7 +98,7 @@ def tensor(shape=None, dtype=None, name=None, value=None):
 
     return Var(
         name=name,
-        structure=LINEAR_ALGEBRA,
+        structure=STRUCTURE_LINEAR_ALGEBRA,
         value=value,
         shape=actual_shape,
         dtype=dtype,
@@ -144,13 +133,13 @@ def scalar(value=None, dtype=None, name=None):
         name = value
         value = None
     if value is not None and name is None:
-        return ScalarExpr(value, LINEAR_ALGEBRA)
+        return ScalarExpr(value, STRUCTURE_LINEAR_ALGEBRA)
     if name is None:
         Var._var_counter += 1
         name = f"s_{Var._var_counter}"
     return Var(
         name=name,
-        structure=LINEAR_ALGEBRA,
+        structure=STRUCTURE_LINEAR_ALGEBRA,
         value=value,
         shape=(),
         dtype=dtype,
@@ -180,7 +169,7 @@ def diff(expr, vars=None, order=1):
             vars = tuple(sorted(expr._get_free_variables(), key=lambda v: v.name))
         n = len(vars)
         out_shape = (n,) * order
-        result = SymbolicTensor(shape=out_shape, structure=LINEAR_ALGEBRA)
+        result = SymbolicTensor(shape=out_shape, structure=STRUCTURE_LINEAR_ALGEBRA)
         for idx in itertools.product(range(n), repeat=order):
             d = expr
             for dim in idx:

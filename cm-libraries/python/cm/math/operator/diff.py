@@ -7,7 +7,7 @@ expression tree representing the derivative.
 """
 
 from __future__ import annotations
-from ..struct.base import Expression, Var, ScalarExpr, _ensure_expression
+from ..struct.base import Expression, Var, ScalarExpr, ensure_expression
 
 
 def differentiate(expr, var):

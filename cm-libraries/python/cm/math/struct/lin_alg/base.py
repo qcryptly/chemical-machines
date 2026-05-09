@@ -19,12 +19,31 @@ from __future__ import annotations
 import inspect
 from typing import Optional, Dict, Tuple, Any
 
-from .struct.base import (
-    Expression, Var, ScalarExpr, _ensure_expression, _resolve_kwargs,
+from ..struct.base import (
+    Expression, Var, ScalarExpr, ensure_expression, _resolve_kwargs,
 )
 
 __all__ = ['SymbolicTensor', 'SymbolicTensorSlice']
 
+
+class ScalarExpr(Expression):
+    """A numeric constant expression."""
+
+    def __init__(self, value, structure):
+        scalar_op = Operation("scalar", arity=0)
+        metadata = {'value': value, 'shape': (), 'is_scalar': True}
+        super().__init__(op=scalar_op, children=[], structure=structure,
+                         metadata=metadata)
+        self.scalar_value = value
+
+    def _get_free_variables(self):
+        return set()
+
+    def _substitute(self, _bindings):
+        return self
+
+    def __repr__(self):
+        return f"ScalarExpr({self.scalar_value})"
 
 class SymbolicTensorSlice:
     """View into a SymbolicTensor for chained indexing (x[0][1] = expr)."""
@@ -126,7 +145,7 @@ class SymbolicTensor:
             key = (key,)
         from .operator import OperatorExpr
         if not isinstance(value, (Expression, OperatorExpr)):
-            value = _ensure_expression(value, self._structure)
+            value = ensure_expression(value, self._structure)
         self._elements[key] = value
         self._is_composite = True
 
@@ -149,7 +168,7 @@ class SymbolicTensor:
         if isinstance(other, SymbolicTensor):
             raise TypeError("Use @ for matrix multiplication; element-wise mul between tensors not yet supported")
         if not isinstance(other, Expression):
-            other = _ensure_expression(other, self._structure)
+            other = ensure_expression(other, self._structure)
         result = SymbolicTensor(shape=self._shape, structure=self._structure)
         for idx in _iter_indices(self._shape):
             result._elements[idx] = self._get_element(*idx) * other
@@ -159,7 +178,7 @@ class SymbolicTensor:
     def __rmul__(self, other):
         """tensor * scalar broadcast (commutative)."""
         if not isinstance(other, Expression):
-            other = _ensure_expression(other, self._structure)
+            other = ensure_expression(other, self._structure)
         result = SymbolicTensor(shape=self._shape, structure=self._structure)
         for idx in _iter_indices(self._shape):
             result._elements[idx] = other * self._get_element(*idx)
